@@ -9,7 +9,7 @@ const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
 let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeRates:[], financePackages:[], financeTravel:[], financeQuery:'', financeFilter:'all', selectedFinanceAttendeeId:null, selectedInvoiceId:null };
+const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeRates:[], financePackages:[], financeTravel:[], financeQuery:'', financeFilter:'all', financeRateQuery:'', financeRateGroup:'all', selectedFinanceRateId:null, selectedFinanceAttendeeId:null, selectedInvoiceId:null };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -108,7 +108,8 @@ if(state.staffTab==='intake') return `<div class="surface"><div class="surface-h
 if(state.staffTab==='protocol') return `<div class="surface"><div class="surface-head"><div><strong>Attendee operations</strong><div class="muted small">Maintain the approved attendee record, then confirm accommodation, travel and lift-pass services.</div></div><div class="protocol-tools"><label class="small muted" for="protocolSearch">Find attendee</label><input id="protocolSearch" type="search" placeholder="Name, email or organisation" value="${esc(state.protocolQuery)}"><button class="btn btn-ghost" id="refreshProtocol">Refresh</button></div></div><div class="surface-body"><div id="protocolTable" class="empty">Loading attendees…</div><div id="protocolDetail"></div></div></div>`;
 if(state.staffTab==='sponsors') return `<div class="surface"><div class="surface-head"><div><strong>Event sponsors</strong><div class="muted small">Manage sponsor terms, billing details, contacts, invitations and attendee accounts.</div></div><div class="sponsor-tools"><input id="sponsorSearch" type="search" placeholder="Find sponsor" value="${esc(state.sponsorQuery)}"><button class="btn btn-ghost" id="refreshSponsors">Refresh</button>${canEditSponsors()?'<button class="btn btn-primary" id="addSponsor">Add sponsor</button>':''}</div></div><div class="surface-body"><div id="sponsorMetrics"></div><div id="sponsorTable" class="empty">Loading sponsors…</div><div id="sponsorDetail"></div></div></div>`;
 if(state.staffTab==='finance') return `<div id="financeMetrics" class="grid grid-4"><div class="card metric"><strong>—</strong><span>Ready for invoice</span></div><div class="card metric"><strong>—</strong><span>Blocked</span></div><div class="card metric"><strong>—</strong><span>Draft invoices</span></div><div class="card metric"><strong>—</strong><span>Draft value</span></div></div>
-<section class="section"><div class="notice warn"><strong>Draft review only.</strong> This stage prepares and checks invoice snapshots. Approval, issue, sending and payment controls remain locked until the rate card and invoice output have been signed off.</div></section>
+<section class="section"><div class="notice"><strong>Invoice snapshots are protected.</strong> Rate changes update current calculations and mark open drafts for rebuilding. Confirmed, issued and paid invoice lines retain the values captured when they were confirmed.</div></section>
+<section class="section"><div class="surface"><div class="surface-head"><div><strong>2027 rate card</strong><div class="muted small">Maintain the confirmed prices used for current calculations and future invoice drafts.</div></div><div class="finance-tools"><input id="financeRateSearch" type="search" placeholder="Find rate" value="${esc(state.financeRateQuery)}"><select id="financeRateGroup" aria-label="Rate category"><option value="all">All rates</option><option value="accommodation">Accommodation</option><option value="passes">Lift passes</option><option value="transfers">Transfers and admin</option><option value="hospitality">Dining and champagne</option><option value="lessons">Lessons</option></select></div></div><div class="surface-body"><div id="financeRateTable" class="empty">Loading rate card…</div><div id="financeRateDetail"></div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Attendee billing readiness</strong><div class="muted small">Resolve each blocker before creating an individual or consolidated draft.</div></div><div class="finance-tools"><input id="financeSearch" type="search" placeholder="Find attendee or account" value="${esc(state.financeQuery)}"><select id="financeFilter" aria-label="Readiness filter"><option value="all">All attendees</option><option value="ready">Ready</option><option value="blocked">Blocked</option><option value="consolidated">Consolidated</option></select><button class="btn btn-ghost" id="refreshFinance">Refresh</button></div></div><div class="surface-body"><div id="financeReadiness" class="empty">Loading billing readiness…</div><div id="financeAttendeeDetail"></div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Consolidated sponsor accounts</strong><div class="muted small">Only attendees explicitly linked for consolidated billing are included.</div></div></div><div class="surface-body"><div id="financeConsolidated" class="empty">Loading sponsor accounts…</div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Invoice drafts</strong><div class="muted small">Open a draft to review its immutable charge-line snapshot.</div></div></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div><div id="invoiceDetail"></div></div></div></section>`;
@@ -139,6 +140,8 @@ function bind(){
   const financeRefresh=document.querySelector('#refreshFinance');if(financeRefresh)financeRefresh.onclick=loadInvoices;
   const financeSearch=document.querySelector('#financeSearch');if(financeSearch)financeSearch.oninput=()=>{state.financeQuery=financeSearch.value;renderFinanceReadiness();};
   const financeFilter=document.querySelector('#financeFilter');if(financeFilter){financeFilter.value=state.financeFilter;financeFilter.onchange=()=>{state.financeFilter=financeFilter.value;renderFinanceReadiness();};}
+  const financeRateSearch=document.querySelector('#financeRateSearch');if(financeRateSearch)financeRateSearch.oninput=()=>{state.financeRateQuery=financeRateSearch.value;renderFinanceRates();};
+  const financeRateGroup=document.querySelector('#financeRateGroup');if(financeRateGroup){financeRateGroup.value=state.financeRateGroup;financeRateGroup.onchange=()=>{state.financeRateGroup=financeRateGroup.value;renderFinanceRates();};}
 }
 
 function formObject(form){
@@ -594,7 +597,7 @@ async function loadInvoices(){
   supabase.from('organisations').select('id,organisation_name,billing_name,billing_email,purchase_order_required').order('organisation_name'),
   supabase.from('event_sponsors').select('id,event_id,organisation_id,sponsor_status,consolidated_invoice_requested,active').eq('event_id',EVENT_ID).eq('active',true),
   supabase.from('invoices').select('id,event_id,attendee_id,billing_account_organisation_id,invoice_type,invoice_reference,status,issue_date,due_date,net_total,vat_total,gross_total,created_at,updated_at').eq('event_id',EVENT_ID).order('created_at',{ascending:false}).limit(100),
-  supabase.from('rate_card').select('id,rate_code,description,charge_category,unit,unit_price,vat_rate,status,active').eq('event_id',EVENT_ID).eq('active',true)
+  supabase.from('rate_card').select('id,rate_code,description,charge_category,unit,unit_price,vat_rate,tax_treatment,status,active,source_note,confirmed_by,confirmed_at,updated_at').eq('event_id',EVENT_ID).eq('active',true).order('charge_category').order('description')
  ]);
  const failed=results.find(result=>result.error);
  if(failed){el.innerHTML=`<div class="notice error">${esc(failed.error.message)}</div>`;return;}
@@ -609,8 +612,9 @@ async function loadInvoices(){
   if(lineResult.error){el.innerHTML=`<div class="notice error">${esc(lineResult.error.message)}</div>`;return;}
   state.financeLines=lineResult.data||[];
  }else state.financeLines=[];
+ if(state.selectedFinanceRateId&&!state.financeRates.some(rate=>rate.id===state.selectedFinanceRateId))state.selectedFinanceRateId=null;
  if(state.selectedInvoiceId&&!state.financeInvoices.some(invoice=>invoice.id===state.selectedInvoiceId))state.selectedInvoiceId=null;
- renderFinanceMetrics();renderFinanceReadiness();renderFinanceConsolidated();renderFinanceInvoices();
+ renderFinanceMetrics();renderFinanceRates();renderFinanceReadiness();renderFinanceConsolidated();renderFinanceInvoices();
  if(state.selectedFinanceAttendeeId)await openFinanceAttendee(state.selectedFinanceAttendeeId,false);
 }
 
@@ -639,12 +643,58 @@ function financeBlockers(row,attendeeId){
 function invoiceStatusLabel(value){return ({ready_for_review:'Ready for review',awaiting_billing_update:'Billing update needed'})[value]||statusLabel(value);}
 function invoiceStatusClass(value){return value==='paid'?'green':value==='issued'||value==='approved'?'purple':value==='cancelled'||value==='void'?'red':'amber';}
 
+function rateStatusLabel(value){return value==='approved'?'Confirmed':value==='retired'?'Retired':'Draft';}
+function rateStatusClass(value){return value==='approved'?'green':value==='retired'?'red':'amber';}
+function rateCategoryLabel(value){return String(value||'Other').replaceAll('_',' ').replace(/\b\w/g,letter=>letter.toUpperCase());}
+function rateUnitLabel(value){return ({per_person_per_night:'Per person, per night',per_person_per_day:'Per person, per day',per_return_transfer:'Per return transfer',per_person:'Per person',per_bottle:'Per bottle',per_person_per_dinner:'Per person, per dinner',per_lesson:'Per lesson'})[value]||rateCategoryLabel(value);}
+function rateGroup(rate){
+ if(rate.charge_category==='accommodation')return'accommodation';
+ if(rate.charge_category==='lift_pass')return'passes';
+ if(['transfer','admin'].includes(rate.charge_category))return'transfers';
+ if(['dinner','champagne','champagne_vat'].includes(rate.charge_category))return'hospitality';
+ if(String(rate.charge_category).startsWith('lesson_'))return'lessons';
+ return'other';
+}
+
+function renderFinanceRates(){
+ const el=document.querySelector('#financeRateTable'),detail=document.querySelector('#financeRateDetail');if(!el||!detail)return;
+ const query=state.financeRateQuery.trim().toLowerCase();
+ const rates=state.financeRates.filter(rate=>(state.financeRateGroup==='all'||rateGroup(rate)===state.financeRateGroup)&&(!query||`${rate.rate_code} ${rate.description} ${rate.charge_category} ${rate.source_note||''}`.toLowerCase().includes(query)));
+ if(!rates.length){el.innerHTML='<div class="empty">No rates match this view.</div>';detail.innerHTML='';return;}
+ el.innerHTML=`<div class="rate-card-summary"><span class="status green">${state.financeRates.filter(rate=>rate.status==='approved').length} confirmed</span><span class="small muted">${state.financeRates.length} active rates</span></div><div class="table-scroll"><table class="data-table rate-table"><thead><tr><th>Rate</th><th>Category</th><th>Charging unit</th><th>Price</th><th>VAT</th><th>Status</th><th></th></tr></thead><tbody>${rates.map(rate=>`<tr><td><strong>${esc(rate.description)}</strong><br><small>${esc(rate.rate_code)}</small></td><td>${esc(rateCategoryLabel(rate.charge_category))}</td><td>${esc(rateUnitLabel(rate.unit))}</td><td><strong>${money(rate.unit_price)}</strong></td><td>${rate.vat_rate==null?'Not specified':`${Number(rate.vat_rate).toFixed(2)}%`}</td><td><span class="status ${rateStatusClass(rate.status)}">${rateStatusLabel(rate.status)}</span></td><td><button class="btn btn-ghost btn-small" data-edit-rate="${rate.id}">Edit</button></td></tr>`).join('')}</tbody></table></div>`;
+ document.querySelectorAll('[data-edit-rate]').forEach(button=>button.onclick=()=>{state.selectedFinanceRateId=button.dataset.editRate;renderFinanceRateDetail();});
+ renderFinanceRateDetail();
+}
+
+function renderFinanceRateDetail(scroll=false){
+ const el=document.querySelector('#financeRateDetail');if(!el)return;
+ const rate=state.financeRates.find(item=>item.id===state.selectedFinanceRateId);if(!rate){el.innerHTML='';return;}
+ const editable=canEditFinance();
+ el.innerHTML=`<section class="rate-detail"><div class="review-heading"><div><span class="status ${rateStatusClass(rate.status)}">${rateStatusLabel(rate.status)}</span><h3>${esc(rate.description)}</h3><p>${esc(rate.rate_code)}</p></div><button class="btn btn-ghost btn-small" id="closeFinanceRate">Close</button></div><div class="rate-meta"><div><small>Category</small><strong>${esc(rateCategoryLabel(rate.charge_category))}</strong></div><div><small>Charging unit</small><strong>${esc(rateUnitLabel(rate.unit))}</strong></div><div><small>Tax treatment</small><strong>${esc(rateCategoryLabel(rate.tax_treatment||'Not specified'))}</strong></div><div><small>Last confirmed</small><strong>${rate.confirmed_at?esc(formatDateTime(rate.confirmed_at)):'Not recorded'}</strong></div></div><form id="financeRateForm" class="form-grid record-form"><div class="field full"><label>Description *</label><input name="description" required value="${esc(rate.description)}" ${editable?'':'disabled'}></div><div class="field"><label>Unit price (£) *</label><input name="unit_price" type="number" min="0" step="0.01" required value="${Number(rate.unit_price).toFixed(2)}" ${editable?'':'disabled'}></div><div class="field"><label>VAT rate (%)</label><input name="vat_rate" type="number" min="0" max="100" step="0.01" value="${rate.vat_rate==null?'':Number(rate.vat_rate).toFixed(2)}" placeholder="Leave blank if not specified" ${editable?'':'disabled'}></div><div class="field full"><label>Source / approval note</label><textarea name="source_note" ${editable?'':'disabled'}>${esc(rate.source_note||'')}</textarea></div><div class="field full"><div class="notice warn">Saving confirms this as the current rate. Current calculations and open drafts will be updated; confirmed, issued and paid invoice snapshots will not change.</div></div>${editable?'<div class="field full"><div class="service-actions"><button class="btn btn-primary" type="submit">Save confirmed rate</button><div class="service-save-result"></div></div></div>':''}</form></section>`;
+ document.querySelector('#closeFinanceRate').onclick=()=>{state.selectedFinanceRateId=null;el.innerHTML='';};
+ const form=document.querySelector('#financeRateForm');if(form&&editable)form.onsubmit=saveFinanceRate;
+ if(scroll)el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function saveFinanceRate(event){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=form.querySelector('button[type=submit]'),result=form.querySelector('.service-save-result');
+ const unitPrice=Number(body.unit_price),vatText=String(body.vat_rate||'').trim(),vatRate=vatText===''?null:Number(vatText);
+ if(!String(body.description||'').trim()){result.innerHTML='<div class="notice error">Add a rate description.</div>';return;}
+ if(!Number.isFinite(unitPrice)||unitPrice<0){result.innerHTML='<div class="notice error">Enter a valid unit price.</div>';return;}
+ if(vatRate!==null&&(!Number.isFinite(vatRate)||vatRate<0||vatRate>100)){result.innerHTML='<div class="notice error">VAT must be between 0 and 100%.</div>';return;}
+ if(!window.confirm('Save and confirm this rate? Open drafts using it will need to be rebuilt.'))return;
+ button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const {error}=await supabase.rpc('save_finance_rate',{p_rate_id:state.selectedFinanceRateId,p_description:body.description,p_unit_price:unitPrice,p_vat_rate:vatRate,p_source_note:body.source_note||null});
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;button.disabled=false;button.textContent='Save confirmed rate';return;}
+ toast('Confirmed rate saved');await loadInvoices();
+}
+
 function renderFinanceMetrics(){
  const el=document.querySelector('#financeMetrics');if(!el)return;
  const ready=state.financeAttendees.filter(attendee=>financeBillingReady(attendee.id)).length;
  const drafts=state.financeInvoices.filter(invoice=>['draft','awaiting_billing_update','ready_for_review'].includes(invoice.status));
- const proposed=state.financeRates.filter(rate=>rate.status!=='approved').length;
- el.innerHTML=`<div class="card metric"><strong>${ready}</strong><span>Ready for invoice</span></div><div class="card metric"><strong>${Math.max(0,state.financeAttendees.length-ready)}</strong><span>Blocked</span></div><div class="card metric"><strong>${drafts.length}</strong><span>Draft invoices</span></div><div class="card metric"><strong>${money(drafts.reduce((sum,invoice)=>sum+Number(invoice.gross_total||0),0))}</strong><span>Draft value · ${proposed} proposed rate${proposed===1?'':'s'}</span></div>`;
+ const confirmed=state.financeRates.filter(rate=>rate.status==='approved').length;
+ el.innerHTML=`<div class="card metric"><strong>${ready}</strong><span>Ready for invoice</span></div><div class="card metric"><strong>${Math.max(0,state.financeAttendees.length-ready)}</strong><span>Blocked</span></div><div class="card metric"><strong>${drafts.length}</strong><span>Draft invoices</span></div><div class="card metric"><strong>${money(drafts.reduce((sum,invoice)=>sum+Number(invoice.gross_total||0),0))}</strong><span>Draft value · ${confirmed} of ${state.financeRates.length} rates confirmed</span></div>`;
 }
 
 function renderFinanceReadiness(){
