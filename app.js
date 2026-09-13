@@ -9,7 +9,7 @@ const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
 let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeRates:[], financeQuery:'', financeFilter:'all', selectedInvoiceId:null };
+const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeRates:[], financeTravel:[], financeQuery:'', financeFilter:'all', selectedFinanceAttendeeId:null, selectedInvoiceId:null };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -109,7 +109,7 @@ if(state.staffTab==='protocol') return `<div class="surface"><div class="surface
 if(state.staffTab==='sponsors') return `<div class="surface"><div class="surface-head"><div><strong>Event sponsors</strong><div class="muted small">Manage sponsor terms, billing details, contacts, invitations and attendee accounts.</div></div><div class="sponsor-tools"><input id="sponsorSearch" type="search" placeholder="Find sponsor" value="${esc(state.sponsorQuery)}"><button class="btn btn-ghost" id="refreshSponsors">Refresh</button>${canEditSponsors()?'<button class="btn btn-primary" id="addSponsor">Add sponsor</button>':''}</div></div><div class="surface-body"><div id="sponsorMetrics"></div><div id="sponsorTable" class="empty">Loading sponsors…</div><div id="sponsorDetail"></div></div></div>`;
 if(state.staffTab==='finance') return `<div id="financeMetrics" class="grid grid-4"><div class="card metric"><strong>—</strong><span>Ready for invoice</span></div><div class="card metric"><strong>—</strong><span>Blocked</span></div><div class="card metric"><strong>—</strong><span>Draft invoices</span></div><div class="card metric"><strong>—</strong><span>Draft value</span></div></div>
 <section class="section"><div class="notice warn"><strong>Draft review only.</strong> This stage prepares and checks invoice snapshots. Approval, issue, sending and payment controls remain locked until the rate card and invoice output have been signed off.</div></section>
-<section class="section"><div class="surface"><div class="surface-head"><div><strong>Attendee billing readiness</strong><div class="muted small">Resolve each blocker before creating an individual or consolidated draft.</div></div><div class="finance-tools"><input id="financeSearch" type="search" placeholder="Find attendee or account" value="${esc(state.financeQuery)}"><select id="financeFilter" aria-label="Readiness filter"><option value="all">All attendees</option><option value="ready">Ready</option><option value="blocked">Blocked</option><option value="consolidated">Consolidated</option></select><button class="btn btn-ghost" id="refreshFinance">Refresh</button></div></div><div class="surface-body"><div id="financeReadiness" class="empty">Loading billing readiness…</div></div></div></section>
+<section class="section"><div class="surface"><div class="surface-head"><div><strong>Attendee billing readiness</strong><div class="muted small">Resolve each blocker before creating an individual or consolidated draft.</div></div><div class="finance-tools"><input id="financeSearch" type="search" placeholder="Find attendee or account" value="${esc(state.financeQuery)}"><select id="financeFilter" aria-label="Readiness filter"><option value="all">All attendees</option><option value="ready">Ready</option><option value="blocked">Blocked</option><option value="consolidated">Consolidated</option></select><button class="btn btn-ghost" id="refreshFinance">Refresh</button></div></div><div class="surface-body"><div id="financeReadiness" class="empty">Loading billing readiness…</div><div id="financeAttendeeDetail"></div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Consolidated sponsor accounts</strong><div class="muted small">Only attendees explicitly linked for consolidated billing are included.</div></div></div><div class="surface-body"><div id="financeConsolidated" class="empty">Loading sponsor accounts…</div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Invoice drafts</strong><div class="muted small">Open a draft to review its immutable charge-line snapshot.</div></div></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div><div id="invoiceDetail"></div></div></div></section>`;
 return `<div class="grid grid-3"><div class="card"><div class="icon">📣</div><h3>Announcements</h3><p>Create priority messages and expiry times.</p></div><div class="card"><div class="icon">📅</div><h3>Programme</h3><p>Publish schedule items by venue and audience.</p></div><div class="card"><div class="icon">📄</div><h3>Documents & table plans</h3><p>Publish versioned event resources without rebuilding the app.</p></div></div>`;
@@ -332,6 +332,7 @@ function joinedDateTime(body,name){
 function incompleteDateTime(body,name){return !!body[`${name}_date`]!==!!body[`${name}_time`];}
 function money(value){return value==null?'—':`£${Number(value).toFixed(2)}`;}
 function formatDate(value){if(!value)return'—';const date=new Date(value);return Number.isNaN(date.getTime())?String(value):new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short',year:'numeric'}).format(date);}
+function formatDateTime(value){if(!value)return'—';const date=new Date(value);return Number.isNaN(date.getTime())?String(value):new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Europe/Paris'}).format(date);}
 function lookupOptions(rows,current,label,placeholder='Select…'){
  const items=current&&!rows.some(row=>row.id===current)?[{id:current,name:'Current selection'},...rows]:rows;
  return `<option value="">${placeholder}</option>${items.map(row=>`<option value="${esc(row.id)}" ${row.id===current?'selected':''}>${esc(label(row))}</option>`).join('')}`;
@@ -589,7 +590,7 @@ async function loadInvoices(){
  const results=await Promise.all([
   supabase.from('v_invoice_readiness').select('attendee_id,event_id,first_name,surname,category,accommodation_confirmed,lift_pass_confirmed,data_checked,exception_flag,ready_for_invoice,transfer_billing_reviewed,unresolved_transfer_count,suppressed_dinner_count,checked_audit_complete,rate_lookup_complete').eq('event_id',EVENT_ID).order('surname').order('first_name'),
   supabase.from('v_finance_charge_estimates').select('attendee_id,event_id,accommodation_net,lift_pass_net,usage_net,estimated_net_total,estimated_vat_total,estimated_gross_total').eq('event_id',EVENT_ID),
-  supabase.from('attendees').select('id,event_id,title_rank,first_name,surname,email,category,display_company,billing_account_organisation_id,consolidated_invoice_included,attendance_status').eq('event_id',EVENT_ID).order('surname').order('first_name'),
+  supabase.from('attendees').select('id,event_id,title_rank,first_name,surname,email,category,display_company,billing_account_organisation_id,consolidated_invoice_included,attendance_status,data_checked,checked_at,exception_flag,exception_reason').eq('event_id',EVENT_ID).order('surname').order('first_name'),
   supabase.from('organisations').select('id,organisation_name,billing_name,billing_email,purchase_order_required').order('organisation_name'),
   supabase.from('event_sponsors').select('id,event_id,organisation_id,sponsor_status,consolidated_invoice_requested,active').eq('event_id',EVENT_ID).eq('active',true),
   supabase.from('invoices').select('id,event_id,attendee_id,billing_account_organisation_id,invoice_type,invoice_reference,status,issue_date,due_date,net_total,vat_total,gross_total,created_at,updated_at').eq('event_id',EVENT_ID).order('created_at',{ascending:false}).limit(100),
@@ -605,6 +606,7 @@ async function loadInvoices(){
  }else state.financeLines=[];
  if(state.selectedInvoiceId&&!state.financeInvoices.some(invoice=>invoice.id===state.selectedInvoiceId))state.selectedInvoiceId=null;
  renderFinanceMetrics();renderFinanceReadiness();renderFinanceConsolidated();renderFinanceInvoices();
+ if(state.selectedFinanceAttendeeId)await openFinanceAttendee(state.selectedFinanceAttendeeId,false);
 }
 
 function financeReadiness(attendeeId){return state.financeReadiness.find(row=>row.attendee_id===attendeeId);}
@@ -648,12 +650,67 @@ function renderFinanceReadiness(){
   const blockers=financeBlockers(readiness),ready=!!readiness?.ready_for_invoice;
   const existing=financeOpenInvoice(invoice=>invoice.invoice_type==='individual'&&invoice.attendee_id===attendee.id);
   const finalised=existing&&['approved','issued','paid'].includes(existing.status);
-  let action='';
-  if(consolidated)action='<span class="small muted">Included below</span>';
-  else if(canEditFinance())action=`<button class="btn btn-ghost btn-small" data-create-individual="${attendee.id}" ${!ready||finalised?'disabled':''}>${finalised?'Finalised':existing?'Rebuild draft':'Create draft'}</button>`;
+  let action=`<button class="btn btn-ghost btn-small" data-review-finance="${attendee.id}">Review</button>`;
+  if(consolidated)action+=`<span class="small muted">Included below</span>`;
+  else if(canEditFinance())action+=`<button class="btn btn-ghost btn-small" data-create-individual="${attendee.id}" ${!ready||finalised?'disabled':''}>${finalised?'Finalised':existing?'Rebuild draft':'Create draft'}</button>`;
   return `<tr><td><strong>${esc(`${attendee.title_rank||''} ${attendee.first_name||''} ${attendee.surname||''}`.trim())}</strong><br><small>${esc(attendee.email||attendee.category||'')}</small></td><td>${esc(organisation?.billing_name||organisation?.organisation_name||'Self / individual')}<br><small>${consolidated?'Consolidated':'Individual'}</small></td><td><strong>${money(summary?.estimated_gross_total||0)}</strong><br><small>Estimated gross · before adjustments</small></td><td><span class="status ${ready?'green':'amber'}">${ready?'Ready':'Blocked'}</span>${blockers.length?`<div class="blocker-list">${blockers.map(item=>`<span>${esc(item)}</span>`).join('')}</div>`:''}</td><td>${action}</td></tr>`;
  }).join('')}</tbody></table></div>`;
+ document.querySelectorAll('[data-review-finance]').forEach(button=>button.onclick=()=>openFinanceAttendee(button.dataset.reviewFinance));
  document.querySelectorAll('[data-create-individual]').forEach(button=>button.onclick=()=>createFinanceDraft('individual',button.dataset.createIndividual,button));
+}
+
+async function openFinanceAttendee(attendeeId,scroll=true){
+ const el=document.querySelector('#financeAttendeeDetail');if(!el)return;
+ state.selectedFinanceAttendeeId=attendeeId;el.innerHTML='<div class="empty">Loading Finance review…</div>';
+ const {data,error}=await supabase.from('travel_records').select('id,direction,method_of_transport,airport_station,flight_travel_number,travel_datetime,resort_datetime,transfer_requested,transfer_service,transfer_chargeable,protocol_confirmed,billing_reviewed,billing_review_notes,billing_reviewed_at').eq('attendee_id',attendeeId).order('direction');
+ if(error){el.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;return;}
+ state.financeTravel=data||[];renderFinanceAttendeeDetail(scroll);
+}
+
+function financeCheckCard(label,complete,detail){
+ return `<div class="finance-check"><span class="status ${complete?'green':'amber'}">${complete?'Complete':'Required'}</span><strong>${esc(label)}</strong><small>${esc(detail)}</small></div>`;
+}
+
+function financeTravelDetail(record){
+ const date=record.travel_datetime?formatDateTime(record.travel_datetime):'Time not recorded';
+ const journey=[record.method_of_transport,record.airport_station,record.flight_travel_number].filter(Boolean).join(' · ')||'Journey details not recorded';
+ const service=record.transfer_requested?(record.transfer_service||'Transfer requested'):'No UKAFWSA transfer requested';
+ return `${journey} · ${date} · ${service}`;
+}
+
+function renderFinanceAttendeeDetail(scroll=true){
+ const el=document.querySelector('#financeAttendeeDetail');if(!el)return;
+ const attendee=state.financeAttendees.find(row=>row.id===state.selectedFinanceAttendeeId);
+ if(!attendee){state.selectedFinanceAttendeeId=null;state.financeTravel=[];el.innerHTML='';return;}
+ const readiness=financeReadiness(attendee.id)||{},editable=canEditFinance();
+ const prerequisiteComplete=!!(readiness.accommodation_confirmed&&readiness.lift_pass_confirmed&&readiness.transfer_billing_reviewed&&readiness.rate_lookup_complete);
+ const travel=state.financeTravel;
+ el.innerHTML=`<section class="finance-attendee-review"><div class="review-heading"><div><span class="status ${readiness.ready_for_invoice?'green':'amber'}">${readiness.ready_for_invoice?'Ready for invoice':'Finance review'}</span><h3>${esc(`${attendee.title_rank||''} ${attendee.first_name||''} ${attendee.surname||''}`.trim())}</h3><p>${esc(attendee.email||attendee.category||'')}</p></div><button class="btn btn-ghost btn-small" id="closeFinanceAttendee">Close</button></div>
+ <div class="finance-check-grid">${financeCheckCard('Accommodation',readiness.accommodation_confirmed,'Confirmed by Protocol')}${financeCheckCard('Lift pass',readiness.lift_pass_confirmed,'Confirmed by Protocol')}${financeCheckCard('Transfer billing',readiness.transfer_billing_reviewed,readiness.transfer_billing_reviewed?'All chargeable transfers reviewed':`${readiness.unresolved_transfer_count||0} review${Number(readiness.unresolved_transfer_count)===1?'':'s'} outstanding`)}${financeCheckCard('Rate lookup',readiness.rate_lookup_complete,'All chargeable services matched')}</div>
+ <div class="finance-review-section"><div class="finance-review-heading"><div><h4>Transfer billing review</h4><p>Protocol records the journey. Finance confirms whether each chargeable transfer is ready to bill.</p></div></div>${travel.length?`<div class="finance-travel-list">${travel.map(record=>`<form class="finance-travel-form" data-finance-travel-id="${record.id}"><div class="finance-travel-head"><div><span class="status ${record.protocol_confirmed?'green':'amber'}">${record.protocol_confirmed?'Protocol confirmed':'Protocol draft'}</span><h4>${record.direction==='departure'?'Departure':'Arrival'}</h4></div><span class="status ${record.transfer_chargeable?'purple':'green'}">${record.transfer_chargeable?'Chargeable':'Not chargeable'}</span></div><p class="finance-journey">${esc(financeTravelDetail(record))}</p>${record.transfer_chargeable?`<div class="form-grid compact-grid"><div class="field checkbox full"><input type="checkbox" name="billing_reviewed" id="billing-${record.id}" ${record.billing_reviewed?'checked':''}${editable?'':' disabled'}><div><label for="billing-${record.id}">Billing reviewed</label><small>Tick only after checking the transfer treatment. A review note is required.</small></div></div><div class="field full"><label>Billing review note</label><textarea name="billing_review_notes" ${editable?'':'disabled'} placeholder="Record what Finance checked">${esc(record.billing_review_notes||'')}</textarea></div></div>${editable?`<div class="service-actions"><button class="btn btn-primary btn-small" type="submit">Save transfer review</button><div class="service-save-result"></div></div>`:''}`:'<div class="notice success">No Finance review is required because this transfer is not chargeable.</div>'}</form>`).join('')}</div>`:'<div class="empty">No travel records have been created for this attendee.</div>'}</div>
+ <form id="financeDataCheckForm" class="finance-review-section"><div class="finance-review-heading"><div><h4>Final Finance data check</h4><p>Complete this after checking the attendee identity, billing account and all confirmed services.</p></div><span class="status ${attendee.data_checked?'green':'amber'}">${attendee.data_checked?'Checked':'Not checked'}</span></div><div class="form-grid compact-grid"><div class="field checkbox full"><input type="checkbox" name="exception_flag" id="financeException" ${attendee.exception_flag?'checked':''}${editable?'':' disabled'}><div><label for="financeException">Unresolved billing exception</label><small>Use only when the record needs an explicit Finance warning.</small></div></div><div class="field full"><label>Exception reason</label><textarea name="exception_reason" ${editable?'':'disabled'} placeholder="Required when an exception is recorded">${esc(attendee.exception_reason||'')}</textarea></div></div>${editable?`<div class="service-actions"><button class="btn btn-primary" type="submit" ${prerequisiteComplete?'':'disabled'}>${attendee.data_checked?'Update data check':'Mark data checked'}</button><div class="service-save-result"></div></div>`:''}${!prerequisiteComplete?'<div class="notice warn finance-prerequisite-note">Complete the four checks above before marking the final data check.</div>':''}${attendee.checked_at?`<p class="small muted finance-audit">Last checked ${esc(formatDateTime(attendee.checked_at))}</p>`:''}</form></section>`;
+ document.querySelector('#closeFinanceAttendee').onclick=()=>{state.selectedFinanceAttendeeId=null;state.financeTravel=[];el.innerHTML='';};
+ document.querySelectorAll('.finance-travel-form').forEach(form=>form.onsubmit=saveFinanceTransferReview);
+ const dataCheck=document.querySelector('#financeDataCheckForm');if(dataCheck)dataCheck.onsubmit=saveFinanceDataCheck;
+ if(scroll)el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function saveFinanceTransferReview(event){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=form.querySelector('button[type=submit]'),result=form.querySelector('.service-save-result');
+ if(body.billing_reviewed&&!String(body.billing_review_notes||'').trim()){result.innerHTML='<div class="notice error">Add a review note before marking this transfer reviewed.</div>';return;}
+ button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const {error}=await supabase.rpc('review_finance_transfer',{p_travel_id:form.dataset.financeTravelId,p_reviewed:!!body.billing_reviewed,p_notes:body.billing_review_notes||null});
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;button.disabled=false;button.textContent='Save transfer review';return;}
+ toast('Transfer billing review saved');await loadInvoices();
+}
+
+async function saveFinanceDataCheck(event){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=form.querySelector('button[type=submit]'),result=form.querySelector('.service-save-result');
+ if(body.exception_flag&&!String(body.exception_reason||'').trim()){result.innerHTML='<div class="notice error">Add a reason for the billing exception.</div>';return;}
+ button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const {error}=await supabase.rpc('mark_finance_attendee_checked',{p_attendee_id:state.selectedFinanceAttendeeId,p_exception_flag:!!body.exception_flag,p_exception_reason:body.exception_reason||null});
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;button.disabled=false;button.textContent='Mark data checked';return;}
+ toast('Final Finance data check saved');await loadInvoices();
 }
 
 function renderFinanceConsolidated(){
