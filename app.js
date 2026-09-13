@@ -7,7 +7,7 @@ const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
 let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[] };
+const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'' };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -103,7 +103,7 @@ function staffSubtitle(){return ({overview:'One view of the event workflow.',int
 function staffPanel(){
 if(state.staffTab==='overview') return `<div class="grid grid-4"><div class="card metric"><strong id="mPending">—</strong><span>Pending registrations</span></div><div class="card metric"><strong id="mAttendees">—</strong><span>Attendees</span></div><div class="card metric"><strong id="mSponsors">—</strong><span>Event sponsors</span></div><div class="card metric"><strong id="mInvoices">—</strong><span>Invoices</span></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Workflow</strong></div><div class="surface-body grid grid-3"><div class="card"><span class="status purple">1</span><h3>Review intake</h3><p>Public form submissions remain requests until Protocol accepts them.</p></div><div class="card"><span class="status purple">2</span><h3>Confirm services</h3><p>Assigned hotel, room, travel, passes and extras become the billable truth.</p></div><div class="card"><span class="status purple">3</span><h3>Issue invoice</h3><p>Finance reviews approved rates and snapshots immutable invoice lines.</p></div></div></div></section>`;
 if(state.staffTab==='intake') return `<div class="surface"><div class="surface-head"><div><strong>Registration review</strong><div class="muted small">Open a request to review every submitted detail before making a decision.</div></div><div class="intake-tools"><label class="small muted" for="intakeFilter">Show</label><select id="intakeFilter"><option value="pending">Pending</option><option value="review_required">Needs follow-up</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="all">All</option></select><button class="btn btn-ghost" id="refreshIntake">Refresh</button></div></div><div class="surface-body"><div id="intakeTable" class="empty">Loading registrations…</div><div id="intakeDetail"></div></div></div>`;
-if(state.staffTab==='protocol') return `<div class="grid grid-3"><div class="card"><div class="icon">🏨</div><h3>Accommodation</h3><p>Manage assigned location, room type, stay segments and approved exceptions.</p></div><div class="card"><div class="icon">🚌</div><h3>Travel & transfers</h3><p>Confirm arrival/departure details and chargeable transfer services.</p></div><div class="card"><div class="icon">🎿</div><h3>Lift passes & usage</h3><p>Confirm pass dates, Carre Neige and daily extras.</p></div></div><section class="section"><div class="notice">The database structures are already in place. The next interface build will add editable attendee records and rate-assisted selectors here.</div></section>`;
+if(state.staffTab==='protocol') return `<div class="surface"><div class="surface-head"><div><strong>Attendee operations</strong><div class="muted small">Maintain the approved attendee record, then confirm accommodation, travel and lift-pass services.</div></div><div class="protocol-tools"><label class="small muted" for="protocolSearch">Find attendee</label><input id="protocolSearch" type="search" placeholder="Name, email or organisation" value="${esc(state.protocolQuery)}"><button class="btn btn-ghost" id="refreshProtocol">Refresh</button></div></div><div class="surface-body"><div id="protocolTable" class="empty">Loading attendees…</div><div id="protocolDetail"></div></div></div>`;
 if(state.staffTab==='sponsors') return `<div class="surface"><div class="surface-head"><strong>Event sponsors</strong><button class="btn btn-primary" disabled>Add sponsor</button></div><div class="surface-body"><div id="sponsorTable" class="empty">Loading sponsors…</div></div></div>`;
 if(state.staffTab==='finance') return `<div class="grid grid-3"><div class="card"><span class="status amber">Proposed</span><h3>2027 rate card</h3><p>Rates remain proposed until approved. Unknown VAT is never guessed.</p></div><div class="card"><span class="status green">Protected</span><h3>Invoice snapshots</h3><p>Issued invoice lines preserve quantity, unit price, net, VAT and gross values.</p></div><div class="card"><span class="status purple">Supported</span><h3>Consolidated billing</h3><p>Sponsor invoices can group attendees by billing organisation while retaining attendee breakdown.</p></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Invoices</strong></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div></div></div></section>`;
 return `<div class="grid grid-3"><div class="card"><div class="icon">📣</div><h3>Announcements</h3><p>Create priority messages and expiry times.</p></div><div class="card"><div class="icon">📅</div><h3>Programme</h3><p>Publish schedule items by venue and audience.</p></div><div class="card"><div class="icon">📄</div><h3>Documents & table plans</h3><p>Publish versioned event resources without rebuilding the app.</p></div></div>`;
@@ -125,6 +125,8 @@ function bind(){
   const out=document.querySelector('#signOutBtn');if(out) out.onclick=async()=>{await supabase.auth.signOut();state.session=null;state.profile=null;render();};
   const ref=document.querySelector('#refreshIntake');if(ref) ref.onclick=loadIntake;
   const filter=document.querySelector('#intakeFilter');if(filter){filter.value=state.intakeFilter;filter.onchange=()=>{state.intakeFilter=filter.value;loadIntake()};}
+  const protocolRefresh=document.querySelector('#refreshProtocol');if(protocolRefresh)protocolRefresh.onclick=loadProtocol;
+  const protocolSearch=document.querySelector('#protocolSearch');if(protocolSearch)protocolSearch.oninput=()=>{state.protocolQuery=protocolSearch.value;renderProtocolRows();};
 }
 
 function formObject(form){
@@ -164,6 +166,7 @@ async function loadStaffData(){
   [['mPending',i.count],['mAttendees',a.count],['mSponsors',s.count],['mInvoices',n.count]].forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.textContent=v??'—'});
  }
  if(state.staffTab==='intake') loadIntake();
+ if(state.staffTab==='protocol') loadProtocol();
  if(state.staffTab==='sponsors') loadSponsors();
  if(state.staffTab==='finance') loadInvoices();
 }
@@ -212,6 +215,82 @@ async function reviewIntake(row,decision){
  await loadIntake();
  const detail=document.querySelector('#intakeDetail');if(detail)detail.innerHTML=`<div class="notice success">${decision==='accepted'?'Registration approved and attendee created.':'Registration marked as '+esc(statusLabel(decision).toLowerCase())+'.'}</div>`;
 }
+
+function protocolStatusLabel(status){return ({expected:'Expected',confirmed:'Confirmed',declined:'Declined',cancelled:'Cancelled'})[status]||status||'Unknown';}
+function protocolStatusClass(status){return status==='confirmed'?'green':(['declined','cancelled'].includes(status)?'red':'purple');}
+function canEditProtocol(){return ['admin','protocol','operations'].includes(state.profile?.app_role);}
+function selectedOptions(values,current,placeholder='Select…'){
+ const items=current&&!values.includes(current)?[current,...values]:values;
+ return `<option value="">${placeholder}</option>${items.map(value=>`<option value="${esc(value)}" ${value===current?'selected':''}>${esc(value)}</option>`).join('')}`;
+}
+
+async function loadProtocol(){
+ const el=document.querySelector('#protocolTable');if(!el)return;el.textContent='Loading attendees…';
+ const {data,error}=await supabase.from('attendees').select('id,attendance_status,category,display_company,title_rank,first_name,surname,known_as,post_nominals,email,mobile,service,discipline,position_role,dietary_requirements,date_of_birth,equipment_hire_required,boot_size,attendee_notes,protocol_notes,data_checked,checked_at,created_at').eq('event_id',EVENT_ID).order('surname').order('first_name').limit(500);
+ if(error){el.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;return;}
+ state.protocolRows=data||[];renderProtocolRows();
+}
+
+function renderProtocolRows(){
+ const el=document.querySelector('#protocolTable');if(!el)return;
+ const term=state.protocolQuery.trim().toLowerCase();
+ const rows=state.protocolRows.filter(a=>!term||[a.first_name,a.surname,a.email,a.display_company,a.category].some(value=>String(value||'').toLowerCase().includes(term)));
+ if(!rows.length){el.innerHTML='<div class="empty">No attendees match this view.</div>';return;}
+ el.innerHTML=`<div class="table-scroll"><table class="data-table protocol-table"><thead><tr><th>Attendee</th><th>Category</th><th>Organisation</th><th>Attendance</th><th>Data</th><th></th></tr></thead><tbody>${rows.map(a=>`<tr><td><strong>${esc(`${a.title_rank||''} ${a.first_name||''} ${a.surname||''}`.trim())}</strong><br><small>${esc(a.email||'')}</small></td><td>${esc(a.category||'')}</td><td>${esc(a.display_company||'—')}</td><td><span class="status ${protocolStatusClass(a.attendance_status)}">${esc(protocolStatusLabel(a.attendance_status))}</span></td><td><span class="status ${a.data_checked?'green':'amber'}">${a.data_checked?'Checked':'Needs review'}</span></td><td><button class="btn btn-ghost btn-small" data-open-attendee="${a.id}">Open</button></td></tr>`).join('')}</tbody></table></div>`;
+ document.querySelectorAll('[data-open-attendee]').forEach(button=>button.onclick=()=>openProtocolAttendee(button.dataset.openAttendee));
+}
+
+async function openProtocolAttendee(id){
+ const attendee=state.protocolRows.find(item=>item.id===id),el=document.querySelector('#protocolDetail');if(!attendee||!el)return;
+ const editable=canEditProtocol(),disabled=editable?'':' disabled';
+ el.innerHTML=`<section class="record-panel"><div class="review-heading"><div><span class="status ${protocolStatusClass(attendee.attendance_status)}">${esc(protocolStatusLabel(attendee.attendance_status))}</span><h3>${esc(`${attendee.title_rank||''} ${attendee.first_name||''} ${attendee.surname||''}`.trim())}</h3><p>${esc(attendee.email||'')}</p></div><button class="btn btn-ghost btn-small" id="closeProtocol">Close</button></div>
+ <form id="attendeeCoreForm" class="form-grid record-form">
+ <div class="form-section"><h3>Core attendee record</h3><p>Changes here are audited and will return the record to “Needs review”.</p></div>
+ <div class="field"><label>Attendance status *</label><select name="attendance_status" required${disabled}>${selectedOptions(['expected','confirmed','declined','cancelled'],attendee.attendance_status)}</select></div>
+ <div class="field"><label>Category *</label><select name="category" required${disabled}>${selectedOptions(['Military VIP','Military Guest','Sponsor','Sponsor Guest','Royal Party','Committee','Protocol','Hill Team','Other'],attendee.category)}</select></div>
+ <div class="field"><label>Rank / title</label><input name="title_rank" value="${esc(attendee.title_rank||'')}"${disabled}></div><div class="field"><label>Known as</label><input name="known_as" value="${esc(attendee.known_as||'')}"${disabled}></div>
+ <div class="field"><label>First name *</label><input name="first_name" required value="${esc(attendee.first_name||'')}"${disabled}></div><div class="field"><label>Surname *</label><input name="surname" required value="${esc(attendee.surname||'')}"${disabled}></div>
+ <div class="field"><label>Post nominals</label><input name="post_nominals" value="${esc(attendee.post_nominals||'')}"${disabled}></div><div class="field"><label>Organisation / display company</label><input name="display_company" value="${esc(attendee.display_company||'')}"${disabled}></div>
+ <div class="field"><label>Role / appointment</label><input name="position_role" value="${esc(attendee.position_role||'')}"${disabled}></div><div class="field"><label>Service</label><select name="service"${disabled}>${selectedOptions(['Royal Navy','British Army','Royal Air Force','Civilian','Other'],attendee.service)}</select></div>
+ <div class="field"><label>Discipline</label><select name="discipline"${disabled}>${selectedOptions(['Alpine','Snowboard','Telemark','Nordic','Bobsleigh','Skeleton','Luge','Other','Not competing'],attendee.discipline)}</select></div><div class="field"><label>Email</label><input name="email" type="email" value="${esc(attendee.email||'')}"${disabled}></div>
+ <div class="field"><label>Mobile</label><input name="mobile" inputmode="tel" value="${esc(attendee.mobile||'')}"${disabled}></div><div class="field"><label>Date of birth</label><input name="date_of_birth" type="date" value="${esc(attendee.date_of_birth||'')}"${disabled}></div>
+ <div class="field checkbox"><input name="equipment_hire_required" id="protocolHire" type="checkbox" ${attendee.equipment_hire_required?'checked':''}${disabled}><label for="protocolHire">Equipment hire information required</label></div><div class="field"><label>Boot size</label><input name="boot_size" value="${esc(attendee.boot_size||'')}"${disabled}></div>
+ <div class="field full"><label>Dietary requirements</label><textarea name="dietary_requirements"${disabled}>${esc(attendee.dietary_requirements||'')}</textarea></div>
+ <div class="field full"><label>Attendee notes</label><textarea name="attendee_notes"${disabled}>${esc(attendee.attendee_notes||'')}</textarea></div>
+ <div class="field full"><label>Protocol notes</label><textarea name="protocol_notes"${disabled}>${esc(attendee.protocol_notes||'')}</textarea></div>
+ ${editable?'<div class="field full"><button class="btn btn-primary" id="saveAttendee" type="submit">Save attendee details</button><div id="attendeeSaveResult"></div></div>':'<div class="field full"><div class="notice">You have read-only access to this attendee record.</div></div>'}
+ </form><div class="form-section services-heading"><h3>Operational services</h3><p>Requested details are shown alongside confirmed operational records.</p></div><div id="protocolServices" class="empty">Loading accommodation, travel and lift-pass records…</div></section>`;
+ document.querySelector('#closeProtocol').onclick=()=>{el.innerHTML='';};
+ const form=document.querySelector('#attendeeCoreForm');if(form&&editable)form.onsubmit=event=>saveAttendeeCore(event,attendee.id);
+ el.scrollIntoView({behavior:'smooth',block:'start'});
+ const [intake,stays,travel,lift]=await Promise.all([
+  supabase.from('intake_submissions').select('raw_payload').eq('mapped_attendee_id',id).maybeSingle(),
+  supabase.from('stay_charge_periods').select('requested_location,requested_check_in,requested_check_out,actual_check_in,actual_check_out,billing_from,billing_to,package_type,protocol_confirmed,accommodation_locations(name),room_types(name)').eq('attendee_id',id).order('created_at'),
+  supabase.from('travel_records').select('direction,method_of_transport,airport_station,flight_travel_number,travel_datetime,resort_datetime,transfer_requested,transfer_service,transfer_chargeable,protocol_confirmed').eq('attendee_id',id).order('direction'),
+  supabase.from('lift_passes').select('required,pass_type,start_date,end_date,carre_neige_required,chargeable,pass_days,total_charge,protocol_confirmed').eq('attendee_id',id).maybeSingle()
+ ]);
+ if(document.querySelector('#protocolServices'))renderProtocolServices(intake.data?.raw_payload||{},stays.data||[],travel.data||[],lift.data||null,[intake.error,stays.error,travel.error,lift.error].filter(Boolean));
+}
+
+function renderProtocolServices(request,stays,travel,lift,errors){
+ const el=document.querySelector('#protocolServices');if(!el)return;
+ if(errors.length){el.innerHTML=`<div class="notice error">Some operational records could not be loaded: ${esc(errors.map(error=>error.message).join('; '))}</div>`;return;}
+ const staySummary=stays.length?stays.map(stay=>`<div class="service-record"><span class="status ${stay.protocol_confirmed?'green':'amber'}">${stay.protocol_confirmed?'Confirmed':'Draft'}</span>${detailRows([['Location',stay.accommodation_locations?.name||stay.requested_location],['Room',stay.room_types?.name],['Actual stay',stay.actual_check_in&&stay.actual_check_out?`${stay.actual_check_in} to ${stay.actual_check_out}`:null],['Billing period',stay.billing_from&&stay.billing_to?`${stay.billing_from} to ${stay.billing_to}`:null],['Package',stay.package_type]])}</div>`).join(''):`<span class="status amber">Not assigned</span>${detailRows([['Requested location',request.hotel_preference],['Requested stay',request.accommodation_from&&request.accommodation_to?`${request.accommodation_from} to ${request.accommodation_to}`:null],['Room share',request.share_room],['Sharing with',request.sharing_with],['Evening meals',request.dinners_required]])}`;
+ const travelSummary=travel.length?travel.map(item=>`<div class="service-record"><span class="status ${item.protocol_confirmed?'green':'amber'}">${esc(item.direction||'Travel')} · ${item.protocol_confirmed?'Confirmed':'Draft'}</span>${detailRows([['Method',item.method_of_transport],['Airport / station',item.airport_station],['Travel number',item.flight_travel_number],['Travel time',item.travel_datetime],['Resort time',item.resort_datetime],['Transfer requested',item.transfer_requested],['Transfer service',item.transfer_service],['Chargeable',item.transfer_chargeable]])}</div>`).join(''):`<span class="status amber">Not confirmed</span>${detailRows([['Arrival',request.arrival_method],['Arrival point',request.arrival_airport_station],['Arrival number',request.arrival_number],['Arrival time',request.arrival_datetime],['Arrival transfer',request.arrival_transfer],['Departure',request.departure_method],['Departure point',request.departure_airport_station],['Departure number',request.departure_number],['Departure time',request.departure_datetime],['Departure transfer',request.departure_transfer]])}`;
+ const liftSummary=lift?`<span class="status ${lift.protocol_confirmed?'green':'amber'}">${lift.protocol_confirmed?'Confirmed':'Draft'}</span>${detailRows([['Required',lift.required],['Pass type',lift.pass_type],['Dates',lift.start_date&&lift.end_date?`${lift.start_date} to ${lift.end_date}`:null],['Carre Neige',lift.carre_neige_required],['Chargeable',lift.chargeable],['Pass days',lift.pass_days],['Total charge',lift.total_charge==null?null:`£${Number(lift.total_charge).toFixed(2)}`]])}`:`<span class="status amber">Not configured</span>${detailRows([['Requested',request.lift_pass_required],['Requested dates',request.first_ski_day&&request.last_ski_day?`${request.first_ski_day} to ${request.last_ski_day}`:null],['Carre Neige',request.carre_neige_required]])}`;
+ el.className='ops-grid';el.innerHTML=`<section class="ops-card"><h4>Accommodation</h4>${staySummary}</section><section class="ops-card"><h4>Travel and transfers</h4>${travelSummary}</section><section class="ops-card"><h4>Lift pass</h4>${liftSummary}</section>`;
+}
+
+async function saveAttendeeCore(event,id){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=document.querySelector('#saveAttendee'),result=document.querySelector('#attendeeSaveResult');
+ button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const {error}=await supabase.rpc('update_attendee_core',{
+  p_attendee_id:id,p_attendance_status:body.attendance_status,p_category:body.category,p_display_company:body.display_company||null,p_title_rank:body.title_rank||null,p_first_name:body.first_name,p_surname:body.surname,p_known_as:body.known_as||null,p_post_nominals:body.post_nominals||null,p_email:body.email||null,p_mobile:body.mobile||null,p_service:body.service||null,p_discipline:body.discipline||null,p_position_role:body.position_role||null,p_dietary_requirements:body.dietary_requirements||null,p_date_of_birth:body.date_of_birth||null,p_equipment_hire_required:!!body.equipment_hire_required,p_boot_size:body.boot_size||null,p_attendee_notes:body.attendee_notes||null,p_protocol_notes:body.protocol_notes||null
+ });
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;button.disabled=false;button.textContent='Save attendee details';return;}
+ toast('Attendee details saved');await loadProtocol();openProtocolAttendee(id);
+}
+
 async function loadSponsors(){
  const el=document.querySelector('#sponsorTable');if(!el)return;const {data,error}=await supabase.from('event_sponsors').select('id,sponsor_status,room_allocation,active,organisations(organisation_name,short_name)').eq('event_id',EVENT_ID).order('created_at');
  if(error){el.innerHTML=`<div class="notice error">${error.message}</div>`;return}if(!data?.length){el.innerHTML='<div class="empty">No event sponsors have been added yet.</div>';return}
