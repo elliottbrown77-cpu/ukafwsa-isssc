@@ -1,0 +1,9 @@
+{
+  "name":"UKAF WSA — ISSSC 2027",
+  "short_name":"ISSSC 2027",
+  "start_url":"/",
+  "display":"standalone",
+  "background_color":"#071827",
+  "theme_color":"#071827",
+  "description":"ISSSC 2027 attendance, event and staff platform"
+}
