@@ -1,37 +1,47 @@
-# UKAF WSA — ISSSC 2027 web platform v0.4.1
+# UKAF WSA — ISSSC 2027 web platform v0.7
 
-Static progressive web application for the Inter Service Snow Sports Championships 2027, backed by the dedicated Supabase ISSSC project and designed for Netlify.
+Static progressive web application for the Inter Service Snow Sports Championships, backed by the dedicated Supabase ISSSC project and deployed through GitHub to Netlify.
 
-## Included
+## v0.7 highlights
 
-- Public ISSSC landing page and live event app
-- Invitation-led native attendee registration, including privacy acknowledgement
-- Secure attendee **My trip** view for request status, confirmed accommodation, travel, lift pass, seating and issued invoices
-- Passwordless staff authentication
-- Admin user and role management with audit-log review
-- Sponsor Manager workspace, named invitation generation and invitation status tracking
-- Protocol intake with accept/decline review and server-validated canonical attendee operations
-- Finance readiness, rate approval, individual and consolidated invoices, invoice status, adjustments, payment links and print/PDF output
-- Event content management for announcements, programme, venues, biographies, documents, table plans and structured seating, including live edits/publish controls
-- Public asset uploads to Supabase Storage
-- PWA/offline shell
-- Privacy notice
-- Netlify redirects and security headers
+- Public Event App now exposes only deliberately public content.
+- Signed-in attendees unlock attendee-only programme items, announcements, documents and table plans plus only their own seating assignment.
+- Attendee-only files are stored in a private Supabase Storage bucket and delivered with short-lived signed URLs.
+- Push announcements respect their configured audience rather than broadcasting every non-public update to every subscriber.
+- Canonical attendee, travel, accommodation, lift-pass, usage and finance tables are read-only to browser clients; privileged mutations run through authenticated Edge Functions and service-only database functions.
+- Finance readiness now checks staff review audit, required accommodation/lift data, rate resolution and chargeable transfer review.
+- Consolidated billing supports explicit attendee inclusion/exclusion, organisation billing-address maintenance, PO requirements, PO references, configurable payment terms and authorised billing-address exceptions.
+- Invoice issue rules block proposed rates and incomplete required billing data.
+- Dinner-only charges that overlap confirmed DB&B are suppressed unless an explicit approved exception exists.
+- Future-year lift-pass and usage defaults derive from the attendee event year instead of hard-coded 2027 rate codes.
+- Booking acceptance now uses the event-configured default lift-pass type and creates durable user-to-attendee links when an authenticated account already exists.
+
+## Existing platform features
+
+- Invitation-led native attendee registration with privacy acknowledgement and validation
+- Secure **My trip** view for attendance status, accommodation, travel, lift pass, seating, invoices and notification preferences
+- Passwordless authentication and role-aware staff workspaces
+- Sponsor Manager: organisations, contacts, event participation, room entitlements and personal invitation links
+- Protocol: intake review, canonical attendee records, split stays, package exceptions, transfer review, lift passes, usage/extras and room inventory
+- Finance: rate approval, readiness, individual/consolidated invoices, adjustments, payment links, PO control and print/PDF output
+- Content: announcements, programme, venues, biographies, documents, table plans, structured seating and push notifications
+- Admin: staff roles, audit log, event setup and controlled rollover to a future championship
+- PWA/offline shell, privacy notice, Netlify redirects and security headers
 
 ## Architecture
 
-- **Netlify** — public and staff web application hosting
+- **Netlify** — static public/staff application hosting
 - **Supabase Auth** — passwordless sign-in
 - **Supabase PostgreSQL** — canonical event, attendance and billing data
-- **Supabase RLS** — browser data-access boundary
-- **Supabase Edge Functions** — privileged Protocol, Finance and booking workflows
-- **Supabase Storage** — controlled public event assets
-- **GitHub** — source control and continuous Netlify deployment
+- **Supabase RLS** — browser read boundary
+- **Supabase Edge Functions** — trusted Protocol, Operations, Finance, Admin and notification actions
+- **Supabase Storage** — separate public and private attendee asset buckets
+- **GitHub** — source control and automatic Netlify deployment
 
-No service-role key is present in the browser. Privileged mutations are performed by authenticated Edge Functions and service-only database functions.
+No service-role key is present in the browser. The public registration remains a request/intake mechanism; Protocol owns the canonical operational record after acceptance. Finance works from confirmed operational data rather than free text.
+
+All 2027 rates remain **Proposed** until explicitly approved by the event authority. Unknown VAT treatment, room capacity, sponsor entitlement, transfer charging unit and unresolved category/rate mappings are not inferred.
 
 ## Deployment
 
-The application is static and requires no frontend build command. Publish the repository root. `netlify.toml` supplies the SPA fallback and security headers.
-
-Supabase Auth must allow the production Netlify origin as a redirect URL for passwordless sign-in. The connected project-owner account is allowlisted as the initial administrator; other staff roles are assigned from the User access workspace after first sign-in.
+No frontend build command is required. Netlify publishes the repository root and `netlify.toml` provides the SPA fallback and security headers. Supabase Auth must allow the production Netlify origin as a redirect URL for passwordless sign-in.
