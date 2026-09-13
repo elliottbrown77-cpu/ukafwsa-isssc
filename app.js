@@ -9,7 +9,7 @@ const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
 let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false };
+const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeRates:[], financeQuery:'', financeFilter:'all', selectedInvoiceId:null };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -107,7 +107,11 @@ if(state.staffTab==='overview') return `<div class="grid grid-4"><div class="car
 if(state.staffTab==='intake') return `<div class="surface"><div class="surface-head"><div><strong>Registration review</strong><div class="muted small">Open a request to review every submitted detail before making a decision.</div></div><div class="intake-tools"><label class="small muted" for="intakeFilter">Show</label><select id="intakeFilter"><option value="pending">Pending</option><option value="review_required">Needs follow-up</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="all">All</option></select><button class="btn btn-ghost" id="refreshIntake">Refresh</button></div></div><div class="surface-body"><div id="intakeTable" class="empty">Loading registrations…</div><div id="intakeDetail"></div></div></div>`;
 if(state.staffTab==='protocol') return `<div class="surface"><div class="surface-head"><div><strong>Attendee operations</strong><div class="muted small">Maintain the approved attendee record, then confirm accommodation, travel and lift-pass services.</div></div><div class="protocol-tools"><label class="small muted" for="protocolSearch">Find attendee</label><input id="protocolSearch" type="search" placeholder="Name, email or organisation" value="${esc(state.protocolQuery)}"><button class="btn btn-ghost" id="refreshProtocol">Refresh</button></div></div><div class="surface-body"><div id="protocolTable" class="empty">Loading attendees…</div><div id="protocolDetail"></div></div></div>`;
 if(state.staffTab==='sponsors') return `<div class="surface"><div class="surface-head"><div><strong>Event sponsors</strong><div class="muted small">Manage sponsor terms, billing details, contacts, invitations and attendee accounts.</div></div><div class="sponsor-tools"><input id="sponsorSearch" type="search" placeholder="Find sponsor" value="${esc(state.sponsorQuery)}"><button class="btn btn-ghost" id="refreshSponsors">Refresh</button>${canEditSponsors()?'<button class="btn btn-primary" id="addSponsor">Add sponsor</button>':''}</div></div><div class="surface-body"><div id="sponsorMetrics"></div><div id="sponsorTable" class="empty">Loading sponsors…</div><div id="sponsorDetail"></div></div></div>`;
-if(state.staffTab==='finance') return `<div class="grid grid-3"><div class="card"><span class="status amber">Proposed</span><h3>2027 rate card</h3><p>Rates remain proposed until approved. Unknown VAT is never guessed.</p></div><div class="card"><span class="status green">Protected</span><h3>Invoice snapshots</h3><p>Issued invoice lines preserve quantity, unit price, net, VAT and gross values.</p></div><div class="card"><span class="status purple">Supported</span><h3>Consolidated billing</h3><p>Sponsor invoices can group attendees by billing organisation while retaining attendee breakdown.</p></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Invoices</strong></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div></div></div></section>`;
+if(state.staffTab==='finance') return `<div id="financeMetrics" class="grid grid-4"><div class="card metric"><strong>—</strong><span>Ready for invoice</span></div><div class="card metric"><strong>—</strong><span>Blocked</span></div><div class="card metric"><strong>—</strong><span>Draft invoices</span></div><div class="card metric"><strong>—</strong><span>Draft value</span></div></div>
+<section class="section"><div class="notice warn"><strong>Draft review only.</strong> This stage prepares and checks invoice snapshots. Approval, issue, sending and payment controls remain locked until the rate card and invoice output have been signed off.</div></section>
+<section class="section"><div class="surface"><div class="surface-head"><div><strong>Attendee billing readiness</strong><div class="muted small">Resolve each blocker before creating an individual or consolidated draft.</div></div><div class="finance-tools"><input id="financeSearch" type="search" placeholder="Find attendee or account" value="${esc(state.financeQuery)}"><select id="financeFilter" aria-label="Readiness filter"><option value="all">All attendees</option><option value="ready">Ready</option><option value="blocked">Blocked</option><option value="consolidated">Consolidated</option></select><button class="btn btn-ghost" id="refreshFinance">Refresh</button></div></div><div class="surface-body"><div id="financeReadiness" class="empty">Loading billing readiness…</div></div></div></section>
+<section class="section"><div class="surface"><div class="surface-head"><div><strong>Consolidated sponsor accounts</strong><div class="muted small">Only attendees explicitly linked for consolidated billing are included.</div></div></div><div class="surface-body"><div id="financeConsolidated" class="empty">Loading sponsor accounts…</div></div></div></section>
+<section class="section"><div class="surface"><div class="surface-head"><div><strong>Invoice drafts</strong><div class="muted small">Open a draft to review its immutable charge-line snapshot.</div></div></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div><div id="invoiceDetail"></div></div></div></section>`;
 return `<div class="grid grid-3"><div class="card"><div class="icon">📣</div><h3>Announcements</h3><p>Create priority messages and expiry times.</p></div><div class="card"><div class="icon">📅</div><h3>Programme</h3><p>Publish schedule items by venue and audience.</p></div><div class="card"><div class="icon">📄</div><h3>Documents & table plans</h3><p>Publish versioned event resources without rebuilding the app.</p></div></div>`;
 }
 function staff(){return state.session ? staffDashboard() : staffLogin();}
@@ -132,6 +136,9 @@ function bind(){
   const sponsorRefresh=document.querySelector('#refreshSponsors');if(sponsorRefresh)sponsorRefresh.onclick=loadSponsors;
   const sponsorSearch=document.querySelector('#sponsorSearch');if(sponsorSearch)sponsorSearch.oninput=()=>{state.sponsorQuery=sponsorSearch.value;renderSponsorRows();};
   const addSponsor=document.querySelector('#addSponsor');if(addSponsor)addSponsor.onclick=()=>{state.newSponsor=true;state.selectedSponsorId=null;state.selectedSponsorContactId=null;renderSponsorDetail();};
+  const financeRefresh=document.querySelector('#refreshFinance');if(financeRefresh)financeRefresh.onclick=loadInvoices;
+  const financeSearch=document.querySelector('#financeSearch');if(financeSearch)financeSearch.oninput=()=>{state.financeQuery=financeSearch.value;renderFinanceReadiness();};
+  const financeFilter=document.querySelector('#financeFilter');if(financeFilter){financeFilter.value=state.financeFilter;financeFilter.onchange=()=>{state.financeFilter=financeFilter.value;renderFinanceReadiness();};}
 }
 
 function formObject(form){
@@ -324,6 +331,7 @@ function joinedDateTime(body,name){
 }
 function incompleteDateTime(body,name){return !!body[`${name}_date`]!==!!body[`${name}_time`];}
 function money(value){return value==null?'—':`£${Number(value).toFixed(2)}`;}
+function formatDate(value){if(!value)return'—';const date=new Date(value);return Number.isNaN(date.getTime())?String(value):new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short',year:'numeric'}).format(date);}
 function lookupOptions(rows,current,label,placeholder='Select…'){
  const items=current&&!rows.some(row=>row.id===current)?[{id:current,name:'Current selection'},...rows]:rows;
  return `<option value="">${placeholder}</option>${items.map(row=>`<option value="${esc(row.id)}" ${row.id===current?'selected':''}>${esc(label(row))}</option>`).join('')}`;
@@ -438,6 +446,7 @@ async function saveAttendeeCore(event,id){
 }
 
 function canEditSponsors(){return ['admin','sponsor_manager'].includes(state.profile?.app_role);}
+function canEditFinance(){return ['admin','finance'].includes(state.profile?.app_role);}
 function checked(value){return value?' checked':'';}
 function sponsorStatusLabel(status){return ({prospective:'Prospective',invited:'Invited',confirmed:'Confirmed',declined:'Declined',cancelled:'Cancelled'})[status]||status||'Unknown';}
 function sponsorStatusClass(status){return status==='confirmed'?'green':(['declined','cancelled'].includes(status)?'red':status==='invited'?'purple':'amber');}
@@ -576,9 +585,124 @@ async function saveSponsorAttendeeLink(event,eventSponsorId){
  toast('Attendee billing link saved');await loadSponsors();
 }
 async function loadInvoices(){
- const el=document.querySelector('#invoiceTable');if(!el)return;const {data,error}=await supabase.from('invoices').select('invoice_reference,status,gross_total,issue_date').eq('event_id',EVENT_ID).order('created_at',{ascending:false}).limit(100);
- if(error){el.innerHTML=`<div class="notice error">${error.message}</div>`;return}if(!data?.length){el.innerHTML='<div class="empty">No invoices yet.</div>';return}
- el.innerHTML=`<div class="table-scroll"><table class="data-table"><thead><tr><th>Reference</th><th>Status</th><th>Gross</th><th>Issue date</th></tr></thead><tbody>${data.map(r=>`<tr><td>${esc(r.invoice_reference||'Draft')}</td><td>${esc(r.status||'')}</td><td>£${Number(r.gross_total||0).toFixed(2)}</td><td>${esc(r.issue_date||'')}</td></tr>`).join('')}</tbody></table></div>`;
+ const el=document.querySelector('#invoiceTable');if(!el)return;
+ const results=await Promise.all([
+  supabase.from('v_invoice_readiness').select('attendee_id,event_id,first_name,surname,category,accommodation_confirmed,lift_pass_confirmed,data_checked,exception_flag,ready_for_invoice,transfer_billing_reviewed,unresolved_transfer_count,suppressed_dinner_count,checked_audit_complete,rate_lookup_complete').eq('event_id',EVENT_ID).order('surname').order('first_name'),
+  supabase.from('v_finance_charge_estimates').select('attendee_id,event_id,accommodation_net,lift_pass_net,usage_net,estimated_net_total,estimated_vat_total,estimated_gross_total').eq('event_id',EVENT_ID),
+  supabase.from('attendees').select('id,event_id,title_rank,first_name,surname,email,category,display_company,billing_account_organisation_id,consolidated_invoice_included,attendance_status').eq('event_id',EVENT_ID).order('surname').order('first_name'),
+  supabase.from('organisations').select('id,organisation_name,billing_name,billing_email,purchase_order_required').order('organisation_name'),
+  supabase.from('event_sponsors').select('id,event_id,organisation_id,sponsor_status,consolidated_invoice_requested,active').eq('event_id',EVENT_ID).eq('active',true),
+  supabase.from('invoices').select('id,event_id,attendee_id,billing_account_organisation_id,invoice_type,invoice_reference,status,issue_date,due_date,net_total,vat_total,gross_total,created_at,updated_at').eq('event_id',EVENT_ID).order('created_at',{ascending:false}).limit(100),
+  supabase.from('rate_card').select('id,status,active').eq('event_id',EVENT_ID).eq('active',true)
+ ]);
+ const failed=results.find(result=>result.error);
+ if(failed){el.innerHTML=`<div class="notice error">${esc(failed.error.message)}</div>`;return;}
+ [state.financeReadiness,state.financeSummaries,state.financeAttendees,state.financeOrganisations,state.financeSponsors,state.financeInvoices,state.financeRates]=results.map(result=>result.data||[]);
+ if(state.financeInvoices.length){
+  const lineResult=await supabase.from('invoice_lines').select('id,invoice_id,attendee_id,source_type,description,quantity,unit_price,net_amount,vat_rate,vat_amount,gross_amount,rate_code,created_at').in('invoice_id',state.financeInvoices.map(invoice=>invoice.id)).order('created_at').limit(1000);
+  if(lineResult.error){el.innerHTML=`<div class="notice error">${esc(lineResult.error.message)}</div>`;return;}
+  state.financeLines=lineResult.data||[];
+ }else state.financeLines=[];
+ if(state.selectedInvoiceId&&!state.financeInvoices.some(invoice=>invoice.id===state.selectedInvoiceId))state.selectedInvoiceId=null;
+ renderFinanceMetrics();renderFinanceReadiness();renderFinanceConsolidated();renderFinanceInvoices();
+}
+
+function financeReadiness(attendeeId){return state.financeReadiness.find(row=>row.attendee_id===attendeeId);}
+function financeSummary(attendeeId){return state.financeSummaries.find(row=>row.attendee_id===attendeeId);}
+function financeOrganisation(organisationId){return state.financeOrganisations.find(row=>row.id===organisationId);}
+function financeOpenInvoice(predicate){return state.financeInvoices.find(invoice=>predicate(invoice)&&!['cancelled','void'].includes(invoice.status));}
+function financeBlockers(row){
+ const blockers=[];
+ if(!row?.accommodation_confirmed)blockers.push('Accommodation');
+ if(!row?.lift_pass_confirmed)blockers.push('Lift pass');
+ if(!row?.checked_audit_complete)blockers.push('Data check');
+ if(!row?.transfer_billing_reviewed)blockers.push(`${row.unresolved_transfer_count||0} transfer review${Number(row.unresolved_transfer_count)===1?'':'s'}`);
+ if(row?.exception_flag)blockers.push('Exception');
+ if(!row?.rate_lookup_complete)blockers.push('Rate lookup');
+ return blockers;
+}
+function invoiceStatusLabel(value){return ({ready_for_review:'Ready for review',awaiting_billing_update:'Billing update needed'})[value]||statusLabel(value);}
+function invoiceStatusClass(value){return value==='paid'?'green':value==='issued'||value==='approved'?'purple':value==='cancelled'||value==='void'?'red':'amber';}
+
+function renderFinanceMetrics(){
+ const el=document.querySelector('#financeMetrics');if(!el)return;
+ const ready=state.financeReadiness.filter(row=>row.ready_for_invoice).length;
+ const drafts=state.financeInvoices.filter(invoice=>['draft','awaiting_billing_update','ready_for_review'].includes(invoice.status));
+ const proposed=state.financeRates.filter(rate=>rate.status!=='approved').length;
+ el.innerHTML=`<div class="card metric"><strong>${ready}</strong><span>Ready for invoice</span></div><div class="card metric"><strong>${Math.max(0,state.financeReadiness.length-ready)}</strong><span>Blocked</span></div><div class="card metric"><strong>${drafts.length}</strong><span>Draft invoices</span></div><div class="card metric"><strong>${money(drafts.reduce((sum,invoice)=>sum+Number(invoice.gross_total||0),0))}</strong><span>Draft value · ${proposed} proposed rate${proposed===1?'':'s'}</span></div>`;
+}
+
+function renderFinanceReadiness(){
+ const el=document.querySelector('#financeReadiness');if(!el)return;
+ const query=state.financeQuery.trim().toLowerCase();
+ const rows=state.financeAttendees.map(attendee=>({attendee,readiness:financeReadiness(attendee.id),summary:financeSummary(attendee.id)})).filter(({attendee,readiness})=>{
+  const consolidated=attendee.billing_account_organisation_id&&attendee.consolidated_invoice_included;
+  const matchesFilter=state.financeFilter==='all'||(state.financeFilter==='ready'&&readiness?.ready_for_invoice)||(state.financeFilter==='blocked'&&!readiness?.ready_for_invoice)||(state.financeFilter==='consolidated'&&consolidated);
+  const organisation=financeOrganisation(attendee.billing_account_organisation_id);
+  const haystack=`${attendee.first_name||''} ${attendee.surname||''} ${attendee.email||''} ${attendee.display_company||''} ${organisation?.organisation_name||''}`.toLowerCase();
+  return matchesFilter&&(!query||haystack.includes(query));
+ });
+ if(!rows.length){el.innerHTML='<div class="empty">No attendees match this view.</div>';return;}
+ el.innerHTML=`<div class="table-scroll"><table class="data-table finance-table"><thead><tr><th>Attendee</th><th>Billing account</th><th>Estimated charges</th><th>Readiness</th><th></th></tr></thead><tbody>${rows.map(({attendee,readiness,summary})=>{
+  const organisation=financeOrganisation(attendee.billing_account_organisation_id),consolidated=attendee.billing_account_organisation_id&&attendee.consolidated_invoice_included;
+  const blockers=financeBlockers(readiness),ready=!!readiness?.ready_for_invoice;
+  const existing=financeOpenInvoice(invoice=>invoice.invoice_type==='individual'&&invoice.attendee_id===attendee.id);
+  const finalised=existing&&['approved','issued','paid'].includes(existing.status);
+  let action='';
+  if(consolidated)action='<span class="small muted">Included below</span>';
+  else if(canEditFinance())action=`<button class="btn btn-ghost btn-small" data-create-individual="${attendee.id}" ${!ready||finalised?'disabled':''}>${finalised?'Finalised':existing?'Rebuild draft':'Create draft'}</button>`;
+  return `<tr><td><strong>${esc(`${attendee.title_rank||''} ${attendee.first_name||''} ${attendee.surname||''}`.trim())}</strong><br><small>${esc(attendee.email||attendee.category||'')}</small></td><td>${esc(organisation?.billing_name||organisation?.organisation_name||'Self / individual')}<br><small>${consolidated?'Consolidated':'Individual'}</small></td><td><strong>${money(summary?.estimated_gross_total||0)}</strong><br><small>Estimated gross · before adjustments</small></td><td><span class="status ${ready?'green':'amber'}">${ready?'Ready':'Blocked'}</span>${blockers.length?`<div class="blocker-list">${blockers.map(item=>`<span>${esc(item)}</span>`).join('')}</div>`:''}</td><td>${action}</td></tr>`;
+ }).join('')}</tbody></table></div>`;
+ document.querySelectorAll('[data-create-individual]').forEach(button=>button.onclick=()=>createFinanceDraft('individual',button.dataset.createIndividual,button));
+}
+
+function renderFinanceConsolidated(){
+ const el=document.querySelector('#financeConsolidated');if(!el)return;
+ const sponsors=state.financeSponsors.filter(sponsor=>sponsor.consolidated_invoice_requested);
+ if(!sponsors.length){el.innerHTML='<div class="empty">No sponsors have requested consolidated billing.</div>';return;}
+ el.innerHTML=`<div class="consolidated-list">${sponsors.map(sponsor=>{
+  const organisation=financeOrganisation(sponsor.organisation_id)||{};
+  const attendees=state.financeAttendees.filter(attendee=>attendee.billing_account_organisation_id===sponsor.organisation_id&&attendee.consolidated_invoice_included);
+  const ready=attendees.filter(attendee=>financeReadiness(attendee.id)?.ready_for_invoice).length;
+  const total=attendees.reduce((sum,attendee)=>sum+Number(financeSummary(attendee.id)?.estimated_gross_total||0),0);
+  const existing=financeOpenInvoice(invoice=>invoice.invoice_type==='consolidated_company'&&invoice.billing_account_organisation_id===sponsor.organisation_id);
+  const finalised=existing&&['approved','issued','paid'].includes(existing.status),canCreate=attendees.length>0&&ready===attendees.length&&!finalised;
+  return `<article class="consolidated-card"><div><span class="status purple">Consolidated</span><h3>${esc(organisation.billing_name||organisation.organisation_name||'Sponsor account')}</h3><p>${attendees.length?`${ready} of ${attendees.length} attendee${attendees.length===1?'':'s'} ready`:'No attendees selected for this account'}</p></div><div class="consolidated-total"><strong>${money(total)}</strong><span>Estimated charges</span></div>${canEditFinance()?`<button class="btn btn-primary btn-small" data-create-consolidated="${sponsor.organisation_id}" ${canCreate?'':'disabled'}>${finalised?'Finalised':existing?'Rebuild draft':'Create draft'}</button>`:''}</article>`;
+ }).join('')}</div>`;
+ document.querySelectorAll('[data-create-consolidated]').forEach(button=>button.onclick=()=>createFinanceDraft('consolidated',button.dataset.createConsolidated,button));
+}
+
+function renderFinanceInvoices(){
+ const el=document.querySelector('#invoiceTable'),detail=document.querySelector('#invoiceDetail');if(!el||!detail)return;
+ if(!state.financeInvoices.length){el.innerHTML='<div class="empty">No invoice drafts have been created yet.</div>';detail.innerHTML='';return;}
+ el.innerHTML=`<div class="table-scroll"><table class="data-table invoice-table"><thead><tr><th>Reference</th><th>Recipient</th><th>Type</th><th>Status</th><th>Gross</th><th></th></tr></thead><tbody>${state.financeInvoices.map(invoice=>{
+  const attendee=state.financeAttendees.find(row=>row.id===invoice.attendee_id),organisation=financeOrganisation(invoice.billing_account_organisation_id);
+  const recipient=invoice.invoice_type==='individual'?`${attendee?.first_name||''} ${attendee?.surname||''}`.trim():(organisation?.billing_name||organisation?.organisation_name||'Organisation');
+  return `<tr><td><strong>${esc(invoice.invoice_reference||'Draft')}</strong><br><small>${formatDate(invoice.created_at)}</small></td><td>${esc(recipient||'—')}</td><td>${invoice.invoice_type==='individual'?'Individual':'Consolidated'}</td><td><span class="status ${invoiceStatusClass(invoice.status)}">${esc(invoiceStatusLabel(invoice.status))}</span></td><td>${money(invoice.gross_total)}</td><td><button class="btn btn-ghost btn-small" data-open-invoice="${invoice.id}">Open</button></td></tr>`;
+ }).join('')}</tbody></table></div>`;
+ document.querySelectorAll('[data-open-invoice]').forEach(button=>button.onclick=()=>{state.selectedInvoiceId=button.dataset.openInvoice;renderFinanceInvoiceDetail();});
+ renderFinanceInvoiceDetail();
+}
+
+function renderFinanceInvoiceDetail(){
+ const el=document.querySelector('#invoiceDetail');if(!el)return;
+ const invoice=state.financeInvoices.find(row=>row.id===state.selectedInvoiceId);if(!invoice){el.innerHTML='';return;}
+ const attendee=state.financeAttendees.find(row=>row.id===invoice.attendee_id),organisation=financeOrganisation(invoice.billing_account_organisation_id);
+ const recipient=invoice.invoice_type==='individual'?`${attendee?.title_rank||''} ${attendee?.first_name||''} ${attendee?.surname||''}`.trim():(organisation?.billing_name||organisation?.organisation_name||'Organisation');
+ const lines=state.financeLines.filter(line=>line.invoice_id===invoice.id);
+ el.innerHTML=`<section class="invoice-detail"><div class="review-heading"><div><span class="status ${invoiceStatusClass(invoice.status)}">${esc(invoiceStatusLabel(invoice.status))}</span><h3>${esc(invoice.invoice_reference)}</h3><p>${esc(recipient)} · ${invoice.invoice_type==='individual'?'Individual invoice':'Consolidated sponsor invoice'}</p></div><button class="btn btn-ghost btn-small" id="closeInvoice">Close</button></div>${lines.length?`<div class="table-scroll"><table class="data-table invoice-lines"><thead><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Net</th><th>VAT</th><th>Gross</th></tr></thead><tbody>${lines.map(line=>`<tr><td><strong>${esc(line.description)}</strong><br><small>${esc(line.rate_code||line.source_type||'')}</small></td><td>${Number(line.quantity||0)}</td><td>${money(line.unit_price)}</td><td>${money(line.net_amount)}</td><td>${money(line.vat_amount)}</td><td>${money(line.gross_amount)}</td></tr>`).join('')}</tbody><tfoot><tr><th colspan="3">Invoice totals</th><th>${money(invoice.net_total)}</th><th>${money(invoice.vat_total)}</th><th>${money(invoice.gross_total)}</th></tr></tfoot></table></div>`:'<div class="notice warn">This draft has no charge lines and cannot progress.</div>'}<div class="invoice-review-note"><strong>Review checkpoint</strong><span>Approval and issue controls will be added only after these calculated lines and the 2027 rate card are confirmed.</span></div></section>`;
+ document.querySelector('#closeInvoice').onclick=()=>{state.selectedInvoiceId=null;renderFinanceInvoiceDetail();};
+ el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function createFinanceDraft(type,targetId,button){
+ const original=button.textContent;button.disabled=true;button.textContent='Creating…';
+ const call=type==='individual'
+  ?supabase.rpc('create_finance_individual_draft',{p_attendee_id:targetId})
+  :supabase.rpc('create_finance_consolidated_draft',{p_event_id:EVENT_ID,p_organisation_id:targetId});
+ const {data,error}=await call;
+ if(error){toast(error.message);button.disabled=false;button.textContent=original;return;}
+ state.selectedInvoiceId=data;toast(type==='individual'?'Individual draft ready for review':'Consolidated draft ready for review');await loadInvoices();
 }
 function esc(v=''){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 
