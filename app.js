@@ -7,7 +7,7 @@ const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
 let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'' };
+const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[]} };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -226,9 +226,17 @@ function selectedOptions(values,current,placeholder='Select…'){
 
 async function loadProtocol(){
  const el=document.querySelector('#protocolTable');if(!el)return;el.textContent='Loading attendees…';
- const {data,error}=await supabase.from('attendees').select('id,attendance_status,category,display_company,title_rank,first_name,surname,known_as,post_nominals,email,mobile,service,discipline,position_role,dietary_requirements,date_of_birth,equipment_hire_required,boot_size,attendee_notes,protocol_notes,data_checked,checked_at,created_at').eq('event_id',EVENT_ID).order('surname').order('first_name').limit(500);
- if(error){el.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;return;}
- state.protocolRows=data||[];renderProtocolRows();
+ const [attendees,locations,rooms,rates]=await Promise.all([
+  supabase.from('attendees').select('id,attendance_status,category,display_company,title_rank,first_name,surname,known_as,post_nominals,email,mobile,service,discipline,position_role,dietary_requirements,date_of_birth,equipment_hire_required,boot_size,attendee_notes,protocol_notes,data_checked,checked_at,created_at').eq('event_id',EVENT_ID).order('surname').order('first_name').limit(500),
+  supabase.from('accommodation_locations').select('id,name,location_type').eq('active',true).order('name'),
+  supabase.from('room_types').select('id,location_id,name,occupancy_class,meal_basis').eq('active',true).order('name'),
+  supabase.from('rate_card').select('rate_code,description,charge_category,location_id,room_type_id,unit,unit_price,status').eq('event_id',EVENT_ID).eq('active',true).in('charge_category',['accommodation','lift_pass']).order('description')
+ ]);
+ const errors=[attendees.error,locations.error,rooms.error,rates.error].filter(Boolean);
+ if(errors.length){el.innerHTML=`<div class="notice error">${esc(errors.map(error=>error.message).join('; '))}</div>`;return;}
+ state.protocolRows=attendees.data||[];
+ state.protocolLookups={locations:locations.data||[],rooms:rooms.data||[],rates:rates.data||[]};
+ renderProtocolRows();
 }
 
 function renderProtocolRows(){
@@ -264,21 +272,121 @@ async function openProtocolAttendee(id){
  const form=document.querySelector('#attendeeCoreForm');if(form&&editable)form.onsubmit=event=>saveAttendeeCore(event,attendee.id);
  el.scrollIntoView({behavior:'smooth',block:'start'});
  const [intake,stays,travel,lift]=await Promise.all([
-  supabase.from('intake_submissions').select('raw_payload').eq('mapped_attendee_id',id).maybeSingle(),
-  supabase.from('stay_charge_periods').select('requested_location,requested_check_in,requested_check_out,actual_check_in,actual_check_out,billing_from,billing_to,package_type,protocol_confirmed,accommodation_locations(name),room_types(name)').eq('attendee_id',id).order('created_at'),
-  supabase.from('travel_records').select('direction,method_of_transport,airport_station,flight_travel_number,travel_datetime,resort_datetime,transfer_requested,transfer_service,transfer_chargeable,protocol_confirmed').eq('attendee_id',id).order('direction'),
-  supabase.from('lift_passes').select('required,pass_type,start_date,end_date,carre_neige_required,chargeable,pass_days,total_charge,protocol_confirmed').eq('attendee_id',id).maybeSingle()
+ supabase.from('intake_submissions').select('raw_payload').eq('mapped_attendee_id',id).maybeSingle(),
+  supabase.from('stay_charge_periods').select('id,location_id,room_type_id,sharing_with_attendee_id,requested_location,requested_check_in,requested_check_out,requested_room_share,requested_share_with,requested_dinners,actual_check_in,actual_check_out,billing_from,billing_to,package_type,rate_code,billable_nights,unit_rate,accommodation_charge,approved_exception,exception_notes,protocol_confirmed,accommodation_locations(name),room_types(name)').eq('attendee_id',id).order('created_at'),
+  supabase.from('travel_records').select('id,direction,method_of_transport,airport_station,flight_travel_number,travel_datetime,resort_datetime,transfer_requested,transfer_service,transfer_chargeable,special_transfer_datetime,assignment_notes,protocol_confirmed,billing_reviewed').eq('attendee_id',id).order('direction'),
+  supabase.from('lift_passes').select('id,required,pass_type,start_date,end_date,carre_neige_required,chargeable,rate_code,unit_rate,pass_days,total_charge,protocol_confirmed,notes').eq('attendee_id',id).maybeSingle()
  ]);
- if(document.querySelector('#protocolServices'))renderProtocolServices(intake.data?.raw_payload||{},stays.data||[],travel.data||[],lift.data||null,[intake.error,stays.error,travel.error,lift.error].filter(Boolean));
+ if(document.querySelector('#protocolServices'))renderProtocolServices(intake.data?.raw_payload||{},stays.data||[],travel.data||[],lift.data||null,[intake.error,stays.error,travel.error,lift.error].filter(Boolean),attendee);
 }
 
-function renderProtocolServices(request,stays,travel,lift,errors){
+function dateTimeLocalValue(value){
+ if(!value)return'';
+ if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))return value;
+ const date=new Date(value);if(Number.isNaN(date.getTime()))return String(value).slice(0,16);
+ const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).reduce((out,part)=>(out[part.type]=part.value,out),{});
+ return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+function eventTimestamp(value){return value?`${value}${value.length===16?':00':''}+01:00`:null;}
+function money(value){return value==null?'—':`£${Number(value).toFixed(2)}`;}
+function lookupOptions(rows,current,label,placeholder='Select…'){
+ const items=current&&!rows.some(row=>row.id===current)?[{id:current,name:'Current selection'},...rows]:rows;
+ return `<option value="">${placeholder}</option>${items.map(row=>`<option value="${esc(row.id)}" ${row.id===current?'selected':''}>${esc(label(row))}</option>`).join('')}`;
+}
+function roomOptions(locationId,current){
+ const rooms=state.protocolLookups.rooms.filter(room=>!locationId||room.location_id===locationId);
+ return lookupOptions(rooms,current,room=>`${room.name}${room.meal_basis?` · ${room.meal_basis}`:''}`,'Select room type…');
+}
+function rateOptions(category,locationId,roomId,current){
+ let rates=state.protocolLookups.rates.filter(rate=>rate.charge_category===category);
+ if(category==='accommodation')rates=locationId&&roomId?rates.filter(rate=>rate.location_id===locationId&&rate.room_type_id===roomId):[];
+ if(current&&!rates.some(rate=>rate.rate_code===current)){
+  const selected=state.protocolLookups.rates.find(rate=>rate.rate_code===current);if(selected)rates=[selected,...rates];
+ }
+ return `<option value="">${category==='accommodation'&&(!locationId||!roomId)?'Select accommodation and room first…':'Select rate…'}</option>${rates.map(rate=>`<option value="${esc(rate.rate_code)}" ${rate.rate_code===current?'selected':''}>${esc(rate.description)} · ${money(rate.unit_price)}${rate.status==='approved'?'':' · proposed'}</option>`).join('')}`;
+}
+function attendeeOptions(current,exclude){
+ return `<option value="">Not recorded</option>${state.protocolRows.filter(a=>a.id!==exclude).map(a=>`<option value="${a.id}" ${a.id===current?'selected':''}>${esc(`${a.title_rank||''} ${a.first_name||''} ${a.surname||''}`.trim())}</option>`).join('')}`;
+}
+function stayForm(stay,request,attendeeId){
+ const editable=canEditProtocol(),disabled=editable?'':' disabled';
+ const requestedLocation=state.protocolLookups.locations.find(location=>location.name.toLowerCase()===String(request.hotel_preference||'').toLowerCase());
+ const locationId=stay?(stay.location_id||''):(requestedLocation?.id||''),roomId=stay?(stay.room_type_id||''):'';
+ const checkIn=stay?(stay.actual_check_in||''):(request.accommodation_from||''),checkOut=stay?(stay.actual_check_out||''):(request.accommodation_to||'');
+ const billingFrom=stay?(stay.billing_from||''):checkIn,billingTo=stay?(stay.billing_to||''):checkOut;
+ return `<form class="service-form stay-form" data-stay-id="${stay?.id||''}"><div class="service-form-head"><div><span class="status ${stay?.protocol_confirmed?'green':'amber'}">${stay?.protocol_confirmed?'Confirmed':'Draft'}</span><strong>${esc(stay?.accommodation_locations?.name||'Accommodation period')}</strong></div>${stay?`<small>${stay.billable_nights??0} nights · ${money(stay.accommodation_charge)}</small>`:'<small>New period</small>'}</div>
+ <div class="form-grid compact-grid"><div class="field"><label>Accommodation</label><select name="location_id"${disabled}>${lookupOptions(state.protocolLookups.locations,locationId,row=>row.name,'Select accommodation…')}</select></div><div class="field"><label>Room / charging role</label><select name="room_type_id"${disabled}>${roomOptions(locationId,roomId)}</select></div>
+ <div class="field"><label>Actual check-in</label><input type="date" name="actual_check_in" value="${esc(checkIn)}"${disabled}></div><div class="field"><label>Actual check-out</label><input type="date" name="actual_check_out" value="${esc(checkOut)}"${disabled}></div>
+ <div class="field"><label>Billing from</label><input type="date" name="billing_from" value="${esc(billingFrom)}"${disabled}></div><div class="field"><label>Billing to</label><input type="date" name="billing_to" value="${esc(billingTo)}"${disabled}></div>
+ <div class="field"><label>Sharing with attendee</label><select name="sharing_with_attendee_id"${disabled}>${attendeeOptions(stay?.sharing_with_attendee_id||'',attendeeId)}</select></div><div class="field"><label>Accommodation rate</label><select name="rate_code"${disabled}>${rateOptions('accommodation',locationId,roomId,stay?.rate_code||'')}</select></div>
+ <div class="field checkbox full"><input type="checkbox" name="protocol_confirmed" ${stay?.protocol_confirmed?'checked':''}${disabled}><div><label>Protocol confirmed</label><small>Confirmation requires a matching rate and complete dates.</small></div></div></div>
+ ${editable?'<div class="service-actions"><button class="btn btn-primary" type="submit">Save accommodation</button><div class="service-save-result"></div></div>':''}</form>`;
+}
+function travelForm(direction,record,request){
+ const editable=canEditProtocol(),disabled=editable?'':' disabled',title=direction==='arrival'?'Arrival':'Departure';
+ const key=direction==='arrival'?'arrival':'departure';
+ const method=record?(record.method_of_transport||''):(request[`${key}_method`]||''),point=record?(record.airport_station||''):(request[`${key}_airport_station`]||''),number=record?(record.flight_travel_number||''):(request[`${key}_number`]||'');
+ const travelTime=dateTimeLocalValue(record?(record.travel_datetime||''):(request[`${key}_datetime`]||'')),resortTime=dateTimeLocalValue(record?(record.resort_datetime||''):(request[`${key}_resort_datetime`]||''));
+ const transfer=record?record.transfer_requested:!!request[`${key}_transfer`];
+ return `<form class="service-form travel-form" data-direction="${direction}"><div class="service-form-head"><div><span class="status ${record?.protocol_confirmed?'green':'amber'}">${record?.protocol_confirmed?'Confirmed':'Draft'}</span><strong>${title}</strong></div>${record?.billing_reviewed?'<small>Billing reviewed</small>':''}</div>
+ <div class="form-grid compact-grid"><div class="field"><label>Method</label><select name="method_of_transport"${disabled}>${selectedOptions(['Flight','Train','Drive','Coach','Other'],method)}</select></div><div class="field"><label>Airport / station</label><input name="airport_station" value="${esc(point)}"${disabled}></div>
+ <div class="field"><label>Flight / travel number</label><input name="flight_travel_number" value="${esc(number)}"${disabled}></div><div class="field"><label>${title} local date and time</label><input type="datetime-local" name="travel_datetime" value="${esc(travelTime)}"${disabled}></div>
+ <div class="field"><label>${direction==='arrival'?'Expected in resort':'Leave resort'} local time</label><input type="datetime-local" name="resort_datetime" value="${esc(resortTime)}"${disabled}></div><div class="field"><label>Special transfer time</label><input type="datetime-local" name="special_transfer_datetime" value="${esc(dateTimeLocalValue(record?.special_transfer_datetime||''))}"${disabled}></div>
+ <div class="field checkbox"><input type="checkbox" name="transfer_requested" ${transfer?'checked':''}${disabled}><label>UKAFWSA transfer required</label></div><div class="field"><label>Transfer service</label><select name="transfer_service"${disabled}>${selectedOptions(['Shared coach','Shared taxi','Private taxi','Own transport','Not required','Other'],record?.transfer_service||'')}</select></div>
+ <div class="field checkbox"><input type="checkbox" name="transfer_chargeable" ${record?.transfer_chargeable?'checked':''}${disabled}><label>Chargeable transfer</label></div><div class="field checkbox"><input type="checkbox" name="protocol_confirmed" ${record?.protocol_confirmed?'checked':''}${disabled}><label>Protocol confirmed</label></div>
+ <div class="field full"><label>Assignment notes</label><textarea name="assignment_notes"${disabled}>${esc(record?.assignment_notes||'')}</textarea></div></div>
+ ${editable?`<div class="service-actions"><button class="btn btn-primary" type="submit">Save ${title.toLowerCase()}</button><div class="service-save-result"></div></div>`:''}</form>`;
+}
+function liftForm(lift,request){
+ const editable=canEditProtocol(),disabled=editable?'':' disabled';
+ const required=lift?lift.required:!!request.lift_pass_required,carre=lift?lift.carre_neige_required:(request.carre_neige_required!==false);
+ const start=lift?(lift.start_date||''):(request.first_ski_day||''),end=lift?(lift.end_date||''):(request.last_ski_day||'');
+ return `<form class="service-form lift-form" data-lift-id="${lift?.id||''}"><div class="service-form-head"><div><span class="status ${lift?.protocol_confirmed?'green':'amber'}">${lift?.protocol_confirmed?'Confirmed':'Draft'}</span><strong>Lift pass</strong></div>${lift?`<small>${lift.pass_days??0} days · ${money(lift.total_charge)}</small>`:'<small>Not yet configured</small>'}</div>
+ <div class="form-grid compact-grid"><div class="field checkbox"><input type="checkbox" name="required" ${required?'checked':''}${disabled}><label>Lift pass required</label></div><div class="field checkbox"><input type="checkbox" name="carre_neige_required" ${carre?'checked':''}${disabled}><label>Carre Neige required</label></div>
+ <div class="field"><label>First ski day</label><input type="date" name="start_date" value="${esc(start)}" min="2027-01-30" max="2027-02-06"${disabled}></div><div class="field"><label>Last ski day</label><input type="date" name="end_date" value="${esc(end)}" min="2027-01-30" max="2027-02-06"${disabled}></div>
+ <div class="field checkbox"><input type="checkbox" name="chargeable" ${(lift?lift.chargeable:true)?'checked':''}${disabled}><label>Chargeable</label></div><div class="field"><label>Lift-pass rate (automatic if blank)</label><select name="rate_code"${disabled}>${rateOptions('lift_pass',null,null,lift?.rate_code||'')}</select></div>
+ <div class="field checkbox full"><input type="checkbox" name="protocol_confirmed" ${lift?.protocol_confirmed?'checked':''}${disabled}><label>Protocol confirmed</label></div><div class="field full"><label>Lift-pass notes</label><textarea name="notes"${disabled}>${esc(lift?.notes||'')}</textarea></div></div>
+ ${editable?'<div class="service-actions"><button class="btn btn-primary" type="submit">Save lift pass</button><div class="service-save-result"></div></div>':''}</form>`;
+}
+function renderProtocolServices(request,stays,travel,lift,errors,attendee){
  const el=document.querySelector('#protocolServices');if(!el)return;
  if(errors.length){el.innerHTML=`<div class="notice error">Some operational records could not be loaded: ${esc(errors.map(error=>error.message).join('; '))}</div>`;return;}
- const staySummary=stays.length?stays.map(stay=>`<div class="service-record"><span class="status ${stay.protocol_confirmed?'green':'amber'}">${stay.protocol_confirmed?'Confirmed':'Draft'}</span>${detailRows([['Location',stay.accommodation_locations?.name||stay.requested_location],['Room',stay.room_types?.name],['Actual stay',stay.actual_check_in&&stay.actual_check_out?`${stay.actual_check_in} to ${stay.actual_check_out}`:null],['Billing period',stay.billing_from&&stay.billing_to?`${stay.billing_from} to ${stay.billing_to}`:null],['Package',stay.package_type]])}</div>`).join(''):`<span class="status amber">Not assigned</span>${detailRows([['Requested location',request.hotel_preference],['Requested stay',request.accommodation_from&&request.accommodation_to?`${request.accommodation_from} to ${request.accommodation_to}`:null],['Room share',request.share_room],['Sharing with',request.sharing_with],['Evening meals',request.dinners_required]])}`;
- const travelSummary=travel.length?travel.map(item=>`<div class="service-record"><span class="status ${item.protocol_confirmed?'green':'amber'}">${esc(item.direction||'Travel')} · ${item.protocol_confirmed?'Confirmed':'Draft'}</span>${detailRows([['Method',item.method_of_transport],['Airport / station',item.airport_station],['Travel number',item.flight_travel_number],['Travel time',item.travel_datetime],['Resort time',item.resort_datetime],['Transfer requested',item.transfer_requested],['Transfer service',item.transfer_service],['Chargeable',item.transfer_chargeable]])}</div>`).join(''):`<span class="status amber">Not confirmed</span>${detailRows([['Arrival',request.arrival_method],['Arrival point',request.arrival_airport_station],['Arrival number',request.arrival_number],['Arrival time',request.arrival_datetime],['Arrival transfer',request.arrival_transfer],['Departure',request.departure_method],['Departure point',request.departure_airport_station],['Departure number',request.departure_number],['Departure time',request.departure_datetime],['Departure transfer',request.departure_transfer]])}`;
- const liftSummary=lift?`<span class="status ${lift.protocol_confirmed?'green':'amber'}">${lift.protocol_confirmed?'Confirmed':'Draft'}</span>${detailRows([['Required',lift.required],['Pass type',lift.pass_type],['Dates',lift.start_date&&lift.end_date?`${lift.start_date} to ${lift.end_date}`:null],['Carre Neige',lift.carre_neige_required],['Chargeable',lift.chargeable],['Pass days',lift.pass_days],['Total charge',lift.total_charge==null?null:`£${Number(lift.total_charge).toFixed(2)}`]])}`:`<span class="status amber">Not configured</span>${detailRows([['Requested',request.lift_pass_required],['Requested dates',request.first_ski_day&&request.last_ski_day?`${request.first_ski_day} to ${request.last_ski_day}`:null],['Carre Neige',request.carre_neige_required]])}`;
- el.className='ops-grid';el.innerHTML=`<section class="ops-card"><h4>Accommodation</h4>${staySummary}</section><section class="ops-card"><h4>Travel and transfers</h4>${travelSummary}</section><section class="ops-card"><h4>Lift pass</h4>${liftSummary}</section>`;
+ const arrival=travel.find(item=>item.direction==='arrival'),departure=travel.find(item=>item.direction==='departure');
+ el.className='ops-stack';el.innerHTML=`<div class="requested-summary"><strong>Original request</strong>${detailRows([['Accommodation',request.accommodation_required],['Hotel preference',request.hotel_preference],['Requested stay',request.accommodation_from&&request.accommodation_to?`${request.accommodation_from} to ${request.accommodation_to}`:null],['Room share',request.share_room],['Sharing with',request.sharing_with],['Lift pass',request.lift_pass_required]])}</div>
+ <section class="service-group"><div class="service-group-head"><div><h4>Accommodation</h4><p>Each period is separately assigned and rated.</p></div>${canEditProtocol()?'<button class="btn btn-ghost btn-small" id="addStayPeriod">Add period</button>':''}</div><div id="stayForms" class="service-form-list">${(stays.length?stays:[null]).map(stay=>stayForm(stay,request,attendee.id)).join('')}</div></section>
+ <section class="service-group"><div class="service-group-head"><div><h4>Travel and transfers</h4><p>Times are entered in local Méribel/Geneva time.</p></div></div><div class="travel-grid">${travelForm('arrival',arrival,request)}${travelForm('departure',departure,request)}</div></section>
+ <section class="service-group"><div class="service-group-head"><div><h4>Lift pass</h4><p>The selected event rate is calculated from confirmed dates and Carre Neige selection.</p></div></div>${liftForm(lift,request)}</section>`;
+ if(canEditProtocol())bindProtocolServiceForms(attendee.id,request);
+}
+function bindProtocolServiceForms(attendeeId,request){
+ document.querySelectorAll('.stay-form').forEach(form=>{
+  form.onsubmit=event=>saveProtocolStay(event,attendeeId);
+  const location=form.elements.location_id,room=form.elements.room_type_id,rate=form.elements.rate_code;
+  location.onchange=()=>{room.innerHTML=roomOptions(location.value,'');rate.innerHTML=rateOptions('accommodation',location.value,'','');};
+  room.onchange=()=>{rate.innerHTML=rateOptions('accommodation',location.value,room.value,'');};
+ });
+ document.querySelectorAll('.travel-form').forEach(form=>form.onsubmit=event=>saveProtocolTravel(event,attendeeId));
+ const lift=document.querySelector('.lift-form');if(lift){lift.onsubmit=event=>saveProtocolLift(event,attendeeId);lift.elements.carre_neige_required.onchange=()=>{lift.elements.rate_code.value='';};}
+ const add=document.querySelector('#addStayPeriod');if(add)add.onclick=()=>{document.querySelector('#stayForms').insertAdjacentHTML('beforeend',stayForm(null,{},attendeeId));bindProtocolServiceForms(attendeeId,request);};
+}
+async function serviceSave(form,rpc,params,message,attendeeId){
+ const button=form.querySelector('button[type=submit]'),result=form.querySelector('.service-save-result'),label=button.textContent;button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const {error}=await supabase.rpc(rpc,params);
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;button.disabled=false;button.textContent=label;return;}
+ toast(message);await openProtocolAttendee(attendeeId);
+}
+function saveProtocolStay(event,attendeeId){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form);
+ if(!form.dataset.stayId&&![body.location_id,body.actual_check_in,body.actual_check_out,body.billing_from,body.billing_to].some(Boolean)){form.querySelector('.service-save-result').innerHTML='<div class="notice error">Enter the accommodation or dates before saving a new period.</div>';return;}
+ return serviceSave(form,'save_protocol_stay',{p_attendee_id:attendeeId,p_stay_id:form.dataset.stayId||null,p_location_id:body.location_id||null,p_room_type_id:body.room_type_id||null,p_sharing_with_attendee_id:body.sharing_with_attendee_id||null,p_actual_check_in:body.actual_check_in||null,p_actual_check_out:body.actual_check_out||null,p_billing_from:body.billing_from||null,p_billing_to:body.billing_to||null,p_rate_code:body.rate_code||null,p_protocol_confirmed:!!body.protocol_confirmed},'Accommodation saved',attendeeId);
+}
+function saveProtocolTravel(event,attendeeId){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),direction=form.dataset.direction;
+ return serviceSave(form,'save_protocol_travel',{p_attendee_id:attendeeId,p_direction:direction,p_method_of_transport:body.method_of_transport||null,p_airport_station:body.airport_station||null,p_flight_travel_number:body.flight_travel_number||null,p_travel_datetime:eventTimestamp(body.travel_datetime),p_resort_datetime:eventTimestamp(body.resort_datetime),p_transfer_requested:!!body.transfer_requested,p_transfer_service:body.transfer_service||null,p_transfer_chargeable:!!body.transfer_chargeable,p_special_transfer_datetime:eventTimestamp(body.special_transfer_datetime),p_assignment_notes:body.assignment_notes||null,p_protocol_confirmed:!!body.protocol_confirmed},`${direction==='arrival'?'Arrival':'Departure'} saved`,attendeeId);
+}
+function saveProtocolLift(event,attendeeId){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form);
+ return serviceSave(form,'save_protocol_lift_pass',{p_attendee_id:attendeeId,p_lift_pass_id:form.dataset.liftId||null,p_required:!!body.required,p_start_date:body.start_date||null,p_end_date:body.end_date||null,p_carre_neige_required:!!body.carre_neige_required,p_chargeable:!!body.chargeable,p_rate_code:body.rate_code||null,p_protocol_confirmed:!!body.protocol_confirmed,p_notes:body.notes||null},'Lift pass saved',attendeeId);
 }
 
 async function saveAttendeeCore(event,id){

@@ -1,4 +1,4 @@
-const CACHE='ukafwsa-isssc-v8';
+const CACHE='ukafwsa-isssc-v9';
 const CORE=['/','/index.html','/styles.css','/app.js','/supabase-client.js','/ukafwsa-mark.svg','/ukafwsa-snowflake.svg','/icon-192.png','/icon-512.png','/maskable-512.png','/manifest.webmanifest'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
