@@ -9,7 +9,7 @@ const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
 let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[]} };
+const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -106,7 +106,7 @@ function staffPanel(){
 if(state.staffTab==='overview') return `<div class="grid grid-4"><div class="card metric"><strong id="mPending">—</strong><span>Pending registrations</span></div><div class="card metric"><strong id="mAttendees">—</strong><span>Attendees</span></div><div class="card metric"><strong id="mSponsors">—</strong><span>Event sponsors</span></div><div class="card metric"><strong id="mInvoices">—</strong><span>Invoices</span></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Workflow</strong></div><div class="surface-body grid grid-3"><div class="card"><span class="status purple">1</span><h3>Review intake</h3><p>Public form submissions remain requests until Protocol accepts them.</p></div><div class="card"><span class="status purple">2</span><h3>Confirm services</h3><p>Assigned hotel, room, travel, passes and extras become the billable truth.</p></div><div class="card"><span class="status purple">3</span><h3>Issue invoice</h3><p>Finance reviews approved rates and snapshots immutable invoice lines.</p></div></div></div></section>`;
 if(state.staffTab==='intake') return `<div class="surface"><div class="surface-head"><div><strong>Registration review</strong><div class="muted small">Open a request to review every submitted detail before making a decision.</div></div><div class="intake-tools"><label class="small muted" for="intakeFilter">Show</label><select id="intakeFilter"><option value="pending">Pending</option><option value="review_required">Needs follow-up</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="all">All</option></select><button class="btn btn-ghost" id="refreshIntake">Refresh</button></div></div><div class="surface-body"><div id="intakeTable" class="empty">Loading registrations…</div><div id="intakeDetail"></div></div></div>`;
 if(state.staffTab==='protocol') return `<div class="surface"><div class="surface-head"><div><strong>Attendee operations</strong><div class="muted small">Maintain the approved attendee record, then confirm accommodation, travel and lift-pass services.</div></div><div class="protocol-tools"><label class="small muted" for="protocolSearch">Find attendee</label><input id="protocolSearch" type="search" placeholder="Name, email or organisation" value="${esc(state.protocolQuery)}"><button class="btn btn-ghost" id="refreshProtocol">Refresh</button></div></div><div class="surface-body"><div id="protocolTable" class="empty">Loading attendees…</div><div id="protocolDetail"></div></div></div>`;
-if(state.staffTab==='sponsors') return `<div class="surface"><div class="surface-head"><strong>Event sponsors</strong><button class="btn btn-primary" disabled>Add sponsor</button></div><div class="surface-body"><div id="sponsorTable" class="empty">Loading sponsors…</div></div></div>`;
+if(state.staffTab==='sponsors') return `<div class="surface"><div class="surface-head"><div><strong>Event sponsors</strong><div class="muted small">Manage sponsor terms, billing details, contacts, invitations and attendee accounts.</div></div><div class="sponsor-tools"><input id="sponsorSearch" type="search" placeholder="Find sponsor" value="${esc(state.sponsorQuery)}"><button class="btn btn-ghost" id="refreshSponsors">Refresh</button>${canEditSponsors()?'<button class="btn btn-primary" id="addSponsor">Add sponsor</button>':''}</div></div><div class="surface-body"><div id="sponsorMetrics"></div><div id="sponsorTable" class="empty">Loading sponsors…</div><div id="sponsorDetail"></div></div></div>`;
 if(state.staffTab==='finance') return `<div class="grid grid-3"><div class="card"><span class="status amber">Proposed</span><h3>2027 rate card</h3><p>Rates remain proposed until approved. Unknown VAT is never guessed.</p></div><div class="card"><span class="status green">Protected</span><h3>Invoice snapshots</h3><p>Issued invoice lines preserve quantity, unit price, net, VAT and gross values.</p></div><div class="card"><span class="status purple">Supported</span><h3>Consolidated billing</h3><p>Sponsor invoices can group attendees by billing organisation while retaining attendee breakdown.</p></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Invoices</strong></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div></div></div></section>`;
 return `<div class="grid grid-3"><div class="card"><div class="icon">📣</div><h3>Announcements</h3><p>Create priority messages and expiry times.</p></div><div class="card"><div class="icon">📅</div><h3>Programme</h3><p>Publish schedule items by venue and audience.</p></div><div class="card"><div class="icon">📄</div><h3>Documents & table plans</h3><p>Publish versioned event resources without rebuilding the app.</p></div></div>`;
 }
@@ -129,6 +129,9 @@ function bind(){
   const filter=document.querySelector('#intakeFilter');if(filter){filter.value=state.intakeFilter;filter.onchange=()=>{state.intakeFilter=filter.value;loadIntake()};}
   const protocolRefresh=document.querySelector('#refreshProtocol');if(protocolRefresh)protocolRefresh.onclick=loadProtocol;
   const protocolSearch=document.querySelector('#protocolSearch');if(protocolSearch)protocolSearch.oninput=()=>{state.protocolQuery=protocolSearch.value;renderProtocolRows();};
+  const sponsorRefresh=document.querySelector('#refreshSponsors');if(sponsorRefresh)sponsorRefresh.onclick=loadSponsors;
+  const sponsorSearch=document.querySelector('#sponsorSearch');if(sponsorSearch)sponsorSearch.oninput=()=>{state.sponsorQuery=sponsorSearch.value;renderSponsorRows();};
+  const addSponsor=document.querySelector('#addSponsor');if(addSponsor)addSponsor.onclick=()=>{state.newSponsor=true;state.selectedSponsorId=null;state.selectedSponsorContactId=null;renderSponsorDetail();};
 }
 
 function formObject(form){
@@ -232,27 +235,30 @@ function selectedOptions(values,current,placeholder='Select…'){
 
 async function loadProtocol(){
  const el=document.querySelector('#protocolTable');if(!el)return;el.textContent='Loading attendees…';
- const [attendees,locations,rooms,rates]=await Promise.all([
-  supabase.from('attendees').select('id,attendance_status,category,display_company,title_rank,first_name,surname,known_as,post_nominals,email,mobile,service,discipline,position_role,dietary_requirements,date_of_birth,equipment_hire_required,boot_size,attendee_notes,protocol_notes,data_checked,checked_at,created_at').eq('event_id',EVENT_ID).order('surname').order('first_name').limit(500),
+ const [attendees,locations,rooms,rates,organisations]=await Promise.all([
+  supabase.from('attendees').select('id,attendance_status,category,display_company,organisation_id,title_rank,first_name,surname,known_as,post_nominals,email,mobile,service,discipline,position_role,dietary_requirements,date_of_birth,equipment_hire_required,boot_size,attendee_notes,protocol_notes,data_checked,checked_at,created_at').eq('event_id',EVENT_ID).order('surname').order('first_name').limit(500),
   supabase.from('accommodation_locations').select('id,name,location_type').eq('active',true).order('name'),
   supabase.from('room_types').select('id,location_id,name,occupancy_class,meal_basis').eq('active',true).order('name'),
-  supabase.from('rate_card').select('rate_code,description,charge_category,location_id,room_type_id,unit,unit_price,status').eq('event_id',EVENT_ID).eq('active',true).in('charge_category',['accommodation','lift_pass']).order('description')
+  supabase.from('rate_card').select('rate_code,description,charge_category,location_id,room_type_id,unit,unit_price,status').eq('event_id',EVENT_ID).eq('active',true).in('charge_category',['accommodation','lift_pass']).order('description'),
+  supabase.from('organisations').select('id,organisation_name').eq('active',true).order('organisation_name')
  ]);
- const errors=[attendees.error,locations.error,rooms.error,rates.error].filter(Boolean);
+ const errors=[attendees.error,locations.error,rooms.error,rates.error,organisations.error].filter(Boolean);
  if(errors.length){el.innerHTML=`<div class="notice error">${esc(errors.map(error=>error.message).join('; '))}</div>`;return;}
  state.protocolRows=attendees.data||[];
- state.protocolLookups={locations:locations.data||[],rooms:rooms.data||[],rates:rates.data||[]};
+ state.protocolLookups={locations:locations.data||[],rooms:rooms.data||[],rates:rates.data||[],organisations:organisations.data||[]};
  renderProtocolRows();
 }
 
 function renderProtocolRows(){
  const el=document.querySelector('#protocolTable');if(!el)return;
  const term=state.protocolQuery.trim().toLowerCase();
- const rows=state.protocolRows.filter(a=>!term||[a.first_name,a.surname,a.email,a.display_company,a.category].some(value=>String(value||'').toLowerCase().includes(term)));
+ const rows=state.protocolRows.filter(a=>!term||[a.first_name,a.surname,a.email,attendeeOrganisationName(a),a.category].some(value=>String(value||'').toLowerCase().includes(term)));
  if(!rows.length){el.innerHTML='<div class="empty">No attendees match this view.</div>';return;}
- el.innerHTML=`<div class="table-scroll"><table class="data-table protocol-table"><thead><tr><th>Attendee</th><th>Category</th><th>Organisation</th><th>Attendance</th><th>Data</th><th></th></tr></thead><tbody>${rows.map(a=>`<tr><td><strong>${esc(`${a.title_rank||''} ${a.first_name||''} ${a.surname||''}`.trim())}</strong><br><small>${esc(a.email||'')}</small></td><td>${esc(a.category||'')}</td><td>${esc(a.display_company||'—')}</td><td><span class="status ${protocolStatusClass(a.attendance_status)}">${esc(protocolStatusLabel(a.attendance_status))}</span></td><td><span class="status ${a.data_checked?'green':'amber'}">${a.data_checked?'Checked':'Needs review'}</span></td><td><button class="btn btn-ghost btn-small" data-open-attendee="${a.id}">Open</button></td></tr>`).join('')}</tbody></table></div>`;
+ el.innerHTML=`<div class="table-scroll"><table class="data-table protocol-table"><thead><tr><th>Attendee</th><th>Category</th><th>Organisation</th><th>Attendance</th><th>Data</th><th></th></tr></thead><tbody>${rows.map(a=>`<tr><td><strong>${esc(`${a.title_rank||''} ${a.first_name||''} ${a.surname||''}`.trim())}</strong><br><small>${esc(a.email||'')}</small></td><td>${esc(a.category||'')}</td><td>${esc(attendeeOrganisationName(a)||'—')}</td><td><span class="status ${protocolStatusClass(a.attendance_status)}">${esc(protocolStatusLabel(a.attendance_status))}</span></td><td><span class="status ${a.data_checked?'green':'amber'}">${a.data_checked?'Checked':'Needs review'}</span></td><td><button class="btn btn-ghost btn-small" data-open-attendee="${a.id}">Open</button></td></tr>`).join('')}</tbody></table></div>`;
  document.querySelectorAll('[data-open-attendee]').forEach(button=>button.onclick=()=>openProtocolAttendee(button.dataset.openAttendee));
 }
+
+function attendeeOrganisationName(attendee){return state.protocolLookups.organisations.find(org=>org.id===attendee.organisation_id)?.organisation_name||attendee.display_company;}
 
 async function openProtocolAttendee(id){
  const attendee=state.protocolRows.find(item=>item.id===id),el=document.querySelector('#protocolDetail');if(!attendee||!el)return;
@@ -431,10 +437,143 @@ async function saveAttendeeCore(event,id){
  toast('Attendee details saved');await loadProtocol();openProtocolAttendee(id);
 }
 
+function canEditSponsors(){return ['admin','sponsor_manager'].includes(state.profile?.app_role);}
+function checked(value){return value?' checked':'';}
+function sponsorStatusLabel(status){return ({prospective:'Prospective',invited:'Invited',confirmed:'Confirmed',declined:'Declined',cancelled:'Cancelled'})[status]||status||'Unknown';}
+function sponsorStatusClass(status){return status==='confirmed'?'green':(['declined','cancelled'].includes(status)?'red':status==='invited'?'purple':'amber');}
+function sponsorOrganisation(row){return Array.isArray(row?.organisations)?row.organisations[0]:row?.organisations;}
+
 async function loadSponsors(){
- const el=document.querySelector('#sponsorTable');if(!el)return;const {data,error}=await supabase.from('event_sponsors').select('id,sponsor_status,room_allocation,active,organisations(organisation_name,short_name)').eq('event_id',EVENT_ID).order('created_at');
- if(error){el.innerHTML=`<div class="notice error">${error.message}</div>`;return}if(!data?.length){el.innerHTML='<div class="empty">No event sponsors have been added yet.</div>';return}
- el.innerHTML=`<div class="table-scroll"><table class="data-table"><thead><tr><th>Organisation</th><th>Status</th><th>Rooms</th><th>Active</th></tr></thead><tbody>${data.map(r=>`<tr><td>${esc(r.organisations?.organisation_name||'')}</td><td>${esc(r.sponsor_status||'')}</td><td>${r.room_allocation??0}</td><td>${r.active?'Yes':'No'}</td></tr>`).join('')}</tbody></table></div>`;
+ const el=document.querySelector('#sponsorTable');if(!el)return;el.textContent='Loading sponsors…';
+ const [sponsors,allocations,contacts,invitations,attendees]=await Promise.all([
+  supabase.from('event_sponsors').select('id,event_id,organisation_id,sponsor_status,room_allocation,race_funding_sponsor,consolidated_invoice_requested,package_notes,active,sponsor_tier,display_in_event_app,protocol_rep_allowance,sponsor_manager_notes,created_at,organisations(id,organisation_name,short_name,billing_name,billing_address_1,billing_address_2,town_city,county_region,postcode,country,billing_email,active,notes,website_url,purchase_order_required,purchase_order_instructions)').eq('event_id',EVENT_ID).order('created_at'),
+  supabase.from('v_sponsor_room_allocation').select('*').eq('event_id',EVENT_ID),
+  supabase.from('sponsor_contacts').select('id,organisation_id,event_id,first_name,surname,job_title,email,mobile,primary_contact,billing_contact,active,notes,created_at').eq('event_id',EVENT_ID).order('surname'),
+  supabase.from('invitations').select('id,event_id,organisation_id,invitee_email,invitee_name,category,invitation_status,invitation_token,sent_at,responded_at,notes,role_position,primary_representative,counts_against_room_allocation,intended_package,created_at').eq('event_id',EVENT_ID).order('created_at',{ascending:false}),
+  supabase.from('attendees').select('id,event_id,title_rank,first_name,surname,email,category,display_company,organisation_id,billing_account_organisation_id,consolidated_invoice_included,linked_main_attendee_id,attendance_status').eq('event_id',EVENT_ID).order('surname').order('first_name')
+ ]);
+ const results=[sponsors,allocations,contacts,invitations,attendees],errors=results.map(result=>result.error).filter(Boolean);
+ if(errors.length){el.innerHTML=`<div class="notice error">${esc(errors.map(error=>error.message).join('; '))}</div>`;return;}
+ state.sponsorRows=sponsors.data||[];state.sponsorAllocations=allocations.data||[];state.sponsorContacts=contacts.data||[];state.sponsorInvitations=invitations.data||[];state.sponsorAttendees=attendees.data||[];
+ if(state.selectedSponsorId&&!state.sponsorRows.some(row=>row.id===state.selectedSponsorId))state.selectedSponsorId=null;
+ renderSponsorRows();renderSponsorMetrics();if(state.newSponsor||state.selectedSponsorId)renderSponsorDetail();
+}
+
+function renderSponsorMetrics(){
+ const el=document.querySelector('#sponsorMetrics');if(!el)return;
+ const confirmed=state.sponsorRows.filter(row=>row.sponsor_status==='confirmed'&&row.active).length;
+ const rooms=state.sponsorRows.reduce((sum,row)=>sum+Number(row.room_allocation||0),0);
+ const remaining=state.sponsorAllocations.reduce((sum,row)=>sum+Number(row.remaining_rooms||0),0);
+ const invited=state.sponsorInvitations.filter(row=>row.invitation_status==='pending').length;
+ el.innerHTML=`<div class="grid grid-4 sponsor-metrics"><div class="card metric"><strong>${state.sponsorRows.length}</strong><span>Event sponsors</span></div><div class="card metric"><strong>${confirmed}</strong><span>Confirmed</span></div><div class="card metric"><strong>${rooms}</strong><span>Rooms allocated</span></div><div class="card metric"><strong>${invited}</strong><span>Pending invitations</span></div></div>`;
+}
+
+function renderSponsorRows(){
+ const el=document.querySelector('#sponsorTable');if(!el)return;
+ const term=state.sponsorQuery.trim().toLowerCase();
+ const rows=state.sponsorRows.filter(row=>{const org=sponsorOrganisation(row)||{};return !term||[org.organisation_name,org.short_name,row.sponsor_tier,row.sponsor_status].some(value=>String(value||'').toLowerCase().includes(term));});
+ if(!rows.length){el.innerHTML=`<div class="empty">${state.sponsorRows.length?'No sponsors match this search.':'No event sponsors have been added yet.'}</div>`;return;}
+ el.innerHTML=`<div class="table-scroll"><table class="data-table sponsor-table"><thead><tr><th>Organisation</th><th>Tier</th><th>Status</th><th>Room allocation</th><th>Billing</th><th></th></tr></thead><tbody>${rows.map(row=>{const org=sponsorOrganisation(row)||{},allocation=state.sponsorAllocations.find(item=>item.event_sponsor_id===row.id);return `<tr><td><strong>${esc(org.organisation_name||'')}</strong><br><small>${esc(org.billing_email||org.short_name||'')}</small></td><td>${esc(row.sponsor_tier||'—')}</td><td><span class="status ${sponsorStatusClass(row.sponsor_status)}">${esc(sponsorStatusLabel(row.sponsor_status))}</span></td><td>${allocation?`${allocation.accepted_attendees||0} accepted · ${allocation.remaining_rooms||0} remaining`:row.room_allocation||0}</td><td>${row.consolidated_invoice_requested?'<span class="status purple">Consolidated</span>':'Individual'}</td><td><button class="btn btn-ghost btn-small" data-open-sponsor="${row.id}">Open</button></td></tr>`;}).join('')}</tbody></table></div>`;
+ document.querySelectorAll('[data-open-sponsor]').forEach(button=>button.onclick=()=>{state.newSponsor=false;state.selectedSponsorId=button.dataset.openSponsor;state.selectedSponsorContactId=null;renderSponsorDetail();});
+}
+
+function sponsorForm(row){
+ const org=sponsorOrganisation(row)||{},editable=canEditSponsors(),disabled=editable?'':' disabled',isNew=!row;
+ const status=row?.sponsor_status||'prospective';
+ return `<form id="sponsorForm" class="form-grid sponsor-form" data-sponsor-id="${row?.id||''}">
+ <div class="form-section"><h3>Organisation and billing</h3><p>The permanent organisation record used for display and invoicing.</p></div>
+ <div class="field"><label>Organisation name *</label><input name="organisation_name" required value="${esc(org.organisation_name||'')}"${disabled}></div><div class="field"><label>Short name</label><input name="short_name" value="${esc(org.short_name||'')}"${disabled}></div>
+ <div class="field"><label>Billing name</label><input name="billing_name" value="${esc(org.billing_name||'')}"${disabled}></div><div class="field"><label>Billing email</label><input type="email" name="billing_email" value="${esc(org.billing_email||'')}"${disabled}></div>
+ <div class="field"><label>Address line 1</label><input name="billing_address_1" value="${esc(org.billing_address_1||'')}"${disabled}></div><div class="field"><label>Address line 2</label><input name="billing_address_2" value="${esc(org.billing_address_2||'')}"${disabled}></div>
+ <div class="field"><label>Town / city</label><input name="town_city" value="${esc(org.town_city||'')}"${disabled}></div><div class="field"><label>County / region</label><input name="county_region" value="${esc(org.county_region||'')}"${disabled}></div>
+ <div class="field"><label>Postcode</label><input name="postcode" value="${esc(org.postcode||'')}"${disabled}></div><div class="field"><label>Country</label><input name="country" value="${esc(org.country||'United Kingdom')}"${disabled}></div>
+ <div class="field"><label>Website</label><input type="url" name="website_url" value="${esc(org.website_url||'')}"${disabled}></div><div class="field checkbox"><input type="checkbox" id="poRequired" name="purchase_order_required"${checked(org.purchase_order_required)}${disabled}><label for="poRequired">Purchase order required</label></div>
+ <div class="field full"><label>Purchase order instructions</label><textarea name="purchase_order_instructions"${disabled}>${esc(org.purchase_order_instructions||'')}</textarea></div><div class="field full"><label>Organisation notes</label><textarea name="organisation_notes"${disabled}>${esc(org.notes||'')}</textarea></div>
+ <div class="form-section"><h3>ISSSC 2027 sponsorship</h3><p>Terms and operational limits for this event only.</p></div>
+ <div class="field"><label>Status</label><select name="sponsor_status"${disabled}>${['prospective','invited','confirmed','declined','cancelled'].map(value=>`<option value="${value}"${value===status?' selected':''}>${sponsorStatusLabel(value)}</option>`).join('')}</select></div><div class="field"><label>Sponsor tier</label><input name="sponsor_tier" placeholder="For example Gold" value="${esc(row?.sponsor_tier||'')}"${disabled}></div>
+ <div class="field"><label>Room allocation</label><input type="number" min="0" step="1" name="room_allocation" value="${row?.room_allocation??0}"${disabled}></div><div class="field"><label>Protocol representative allowance</label><input type="number" min="0" step="1" name="protocol_rep_allowance" value="${row?.protocol_rep_allowance??0}"${disabled}></div>
+ <div class="field checkbox"><input type="checkbox" id="raceFunding" name="race_funding_sponsor"${checked(row?.race_funding_sponsor)}${disabled}><label for="raceFunding">Race-funding sponsor</label></div><div class="field checkbox"><input type="checkbox" id="consolidatedBilling" name="consolidated_invoice_requested"${checked(row?.consolidated_invoice_requested)}${disabled}><label for="consolidatedBilling">Consolidated invoice requested</label></div>
+ <div class="field checkbox"><input type="checkbox" id="displaySponsor" name="display_in_event_app"${checked(row?.display_in_event_app??true)}${disabled}><label for="displaySponsor">Display in event app</label></div><div class="field checkbox"><input type="checkbox" id="activeSponsor" name="active"${checked(row?.active??true)}${disabled}><label for="activeSponsor">Active for this event</label></div>
+ <div class="field full"><label>Package notes</label><textarea name="package_notes"${disabled}>${esc(row?.package_notes||'')}</textarea></div><div class="field full"><label>Sponsor manager notes</label><textarea name="sponsor_manager_notes"${disabled}>${esc(row?.sponsor_manager_notes||'')}</textarea></div>
+ ${editable?`<div class="field full"><div class="service-actions"><button class="btn btn-primary" type="submit">${isNew?'Create sponsor':'Save sponsor'}</button><div id="sponsorSaveResult" class="service-save-result"></div></div></div>`:'<div class="field full"><div class="notice">You have read-only access to sponsor records.</div></div>'}
+ </form>`;
+}
+
+function contactForm(row){
+ const editable=canEditSponsors(),disabled=editable?'':' disabled';
+ return `<form id="sponsorContactForm" class="form-grid compact-grid" data-contact-id="${row?.id||''}"><div class="field"><label>First name *</label><input name="first_name" required value="${esc(row?.first_name||'')}"${disabled}></div><div class="field"><label>Surname *</label><input name="surname" required value="${esc(row?.surname||'')}"${disabled}></div><div class="field"><label>Job title</label><input name="job_title" value="${esc(row?.job_title||'')}"${disabled}></div><div class="field"><label>Email</label><input type="email" name="email" value="${esc(row?.email||'')}"${disabled}></div><div class="field"><label>Mobile</label><input name="mobile" value="${esc(row?.mobile||'')}"${disabled}></div><div class="field checkbox"><input type="checkbox" id="primaryContact" name="primary_contact"${checked(row?.primary_contact)}${disabled}><label for="primaryContact">Primary contact</label></div><div class="field checkbox"><input type="checkbox" id="billingContact" name="billing_contact"${checked(row?.billing_contact)}${disabled}><label for="billingContact">Billing contact</label></div><div class="field checkbox"><input type="checkbox" id="activeContact" name="active"${checked(row?.active??true)}${disabled}><label for="activeContact">Active contact</label></div><div class="field full"><label>Notes</label><textarea name="notes"${disabled}>${esc(row?.notes||'')}</textarea></div>${editable?'<div class="field full"><div class="service-actions"><button class="btn btn-primary" type="submit">Save contact</button><button class="btn btn-ghost" type="button" id="cancelContact">Cancel</button><div id="contactSaveResult" class="service-save-result"></div></div></div>':''}</form>`;
+}
+
+function sponsorContactsSection(row){
+ const org=sponsorOrganisation(row)||{},contacts=state.sponsorContacts.filter(contact=>contact.organisation_id===row.organisation_id),editing=contacts.find(contact=>contact.id===state.selectedSponsorContactId);
+ return `<section class="sponsor-subsection"><div class="service-group-head"><div><h4>Contacts</h4><p>Keep the main operational and billing contacts clear.</p></div>${canEditSponsors()?'<button class="btn btn-ghost btn-small" id="addSponsorContact">Add contact</button>':''}</div>${contacts.length?`<div class="contact-list">${contacts.map(contact=>`<div class="contact-row"><div><strong>${esc(`${contact.first_name} ${contact.surname}`)}</strong><small>${esc([contact.job_title,contact.email,contact.mobile].filter(Boolean).join(' · '))}</small></div><div class="contact-tags">${contact.primary_contact?'<span class="status purple">Primary</span>':''}${contact.billing_contact?'<span class="status green">Billing</span>':''}${!contact.active?'<span class="status red">Inactive</span>':''}<button class="btn btn-ghost btn-small" data-edit-contact="${contact.id}">Edit</button></div></div>`).join('')}</div>`:`<div class="empty">No contacts recorded for ${esc(org.organisation_name||'this sponsor')}.</div>`}<div id="contactEditor">${state.selectedSponsorContactId==='new'||editing?contactForm(editing):''}</div></section>`;
+}
+
+function sponsorInvitationSection(row){
+ const invitations=state.sponsorInvitations.filter(invite=>invite.organisation_id===row.organisation_id),editable=canEditSponsors();
+ return `<section class="sponsor-subsection"><div class="service-group-head"><div><h4>Registration invitations</h4><p>Create a secure registration link to copy into your own email.</p></div></div>${editable?`<form id="sponsorInvitationForm" class="form-grid compact-grid"><div class="field"><label>Invitee name</label><input name="invitee_name"></div><div class="field"><label>Invitee email *</label><input type="email" name="invitee_email" required></div><div class="field"><label>Category</label><select name="category">${opts(['Sponsor','Sponsor Guest','Military VIP','Military Guest','Other'],'Choose category')}</select></div><div class="field"><label>Role / position</label><input name="role_position"></div><div class="field"><label>Intended package</label><input name="intended_package"></div><div class="field checkbox"><input type="checkbox" id="primaryRepresentative" name="primary_representative"><label for="primaryRepresentative">Primary representative</label></div><div class="field checkbox"><input type="checkbox" id="countsRooms" name="counts_against_room_allocation" checked><label for="countsRooms">Counts against room allocation</label></div><div class="field full"><label>Notes</label><textarea name="notes"></textarea></div><div class="field full"><div class="service-actions"><button class="btn btn-primary" type="submit">Create invitation</button><div id="invitationSaveResult" class="service-save-result"></div></div></div></form>`:''}${invitations.length?`<div class="table-scroll subsection-table"><table class="data-table"><thead><tr><th>Invitee</th><th>Category</th><th>Status</th><th>Rooms</th><th></th></tr></thead><tbody>${invitations.map(invite=>`<tr><td><strong>${esc(invite.invitee_name||'Unnamed')}</strong><br><small>${esc(invite.invitee_email)}</small></td><td>${esc(invite.category||'')}</td><td><span class="status ${invite.invitation_status==='accepted'?'green':'purple'}">${esc(invite.invitation_status||'pending')}</span></td><td>${invite.counts_against_room_allocation?'Yes':'No'}</td><td><button class="btn btn-ghost btn-small" data-copy-invite="${invite.invitation_token}">Copy link</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No invitations created yet.</div>'}</section>`;
+}
+
+function attendeeLinkForm(attendee,row){
+ const orgId=row.organisation_id,display=attendee.organisation_id===orgId,billing=attendee.billing_account_organisation_id===orgId,disabled=canEditSponsors()?'':' disabled';
+ const mains=state.sponsorAttendees.filter(item=>item.id!==attendee.id);
+ return `<form class="attendee-link-form" data-attendee-id="${attendee.id}"><div class="attendee-name"><strong>${esc(`${attendee.title_rank||''} ${attendee.first_name||''} ${attendee.surname||''}`.trim())}</strong><small>${esc(attendee.email||attendee.category||'')}</small></div><label><input type="checkbox" name="display_as_sponsor"${checked(display)}${disabled}> Display sponsor</label><label><input type="checkbox" name="bill_to_sponsor"${checked(billing)}${disabled}> Bill to sponsor</label><label><input type="checkbox" name="consolidated_invoice_included"${checked(attendee.consolidated_invoice_included??true)}${disabled}> Consolidated</label><select name="linked_main_attendee_id" aria-label="Linked main attendee"${disabled}><option value="">No linked main attendee</option>${mains.map(main=>`<option value="${main.id}"${main.id===attendee.linked_main_attendee_id?' selected':''}>${esc(`${main.first_name} ${main.surname}`)}</option>`).join('')}</select>${canEditSponsors()?'<button class="btn btn-ghost btn-small" type="submit">Save</button>':''}<div class="link-save-result"></div></form>`;
+}
+
+function sponsorAttendeesSection(row){
+ return `<section class="sponsor-subsection"><div class="service-group-head"><div><h4>Attendee and billing links</h4><p>Choose whose organisation is displayed and whose charges belong on this sponsor account.</p></div></div>${state.sponsorAttendees.length?`<div class="attendee-link-list">${state.sponsorAttendees.map(attendee=>attendeeLinkForm(attendee,row)).join('')}</div>`:'<div class="empty">No approved attendees are available yet.</div>'}</section>`;
+}
+
+function renderSponsorDetail(){
+ const el=document.querySelector('#sponsorDetail');if(!el)return;
+ const row=state.sponsorRows.find(item=>item.id===state.selectedSponsorId);
+ if(!state.newSponsor&&!row){el.innerHTML='';return;}
+ const org=sponsorOrganisation(row)||{},allocation=row&&state.sponsorAllocations.find(item=>item.event_sponsor_id===row.id);
+ el.innerHTML=`<section class="record-panel sponsor-record"><div class="review-heading"><div>${row?`<span class="status ${sponsorStatusClass(row.sponsor_status)}">${esc(sponsorStatusLabel(row.sponsor_status))}</span>`:'<span class="status purple">New sponsor</span>'}<h3>${esc(org.organisation_name||'Create event sponsor')}</h3><p>${row?esc([row.sponsor_tier,org.billing_email].filter(Boolean).join(' · ')):'Add the organisation and its ISSSC 2027 terms.'}</p></div><button class="btn btn-ghost btn-small" id="closeSponsor">Close</button></div>${allocation?`<div class="allocation-strip"><div><strong>${allocation.room_allocation||0}</strong><span>Allocated</span></div><div><strong>${allocation.allocated_invites||0}</strong><span>Invited</span></div><div><strong>${allocation.responded_invites||0}</strong><span>Responded</span></div><div><strong>${allocation.accepted_attendees||0}</strong><span>Accepted</span></div><div class="${allocation.over_allocation?'over':''}"><strong>${allocation.remaining_rooms||0}</strong><span>Remaining</span></div></div>`:''}${sponsorForm(row)}${row?`${sponsorContactsSection(row)}${sponsorInvitationSection(row)}${sponsorAttendeesSection(row)}`:''}</section>`;
+ document.querySelector('#closeSponsor').onclick=()=>{state.newSponsor=false;state.selectedSponsorId=null;state.selectedSponsorContactId=null;el.innerHTML='';};
+ const form=document.querySelector('#sponsorForm');if(form&&canEditSponsors())form.onsubmit=saveSponsor;
+ if(!row)return;
+ const addContact=document.querySelector('#addSponsorContact');if(addContact)addContact.onclick=()=>{state.selectedSponsorContactId='new';renderSponsorDetail();document.querySelector('#contactEditor')?.scrollIntoView({behavior:'smooth',block:'center'});};
+ document.querySelectorAll('[data-edit-contact]').forEach(button=>button.onclick=()=>{state.selectedSponsorContactId=button.dataset.editContact;renderSponsorDetail();document.querySelector('#contactEditor')?.scrollIntoView({behavior:'smooth',block:'center'});});
+ const contactFormEl=document.querySelector('#sponsorContactForm');if(contactFormEl)contactFormEl.onsubmit=event=>saveSponsorContact(event,row.id);
+ const cancelContact=document.querySelector('#cancelContact');if(cancelContact)cancelContact.onclick=()=>{state.selectedSponsorContactId=null;renderSponsorDetail();};
+ const invitationForm=document.querySelector('#sponsorInvitationForm');if(invitationForm)invitationForm.onsubmit=event=>createSponsorInvitation(event,row.id);
+ document.querySelectorAll('[data-copy-invite]').forEach(button=>button.onclick=()=>copyInvitationLink(button.dataset.copyInvite));
+ document.querySelectorAll('.attendee-link-form').forEach(formEl=>formEl.onsubmit=event=>saveSponsorAttendeeLink(event,row.id));
+ el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function saveSponsor(event){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=form.querySelector('button[type=submit]'),result=document.querySelector('#sponsorSaveResult');button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const {data,error}=await supabase.rpc('save_sponsor_workspace',{p_event_id:EVENT_ID,p_event_sponsor_id:form.dataset.sponsorId||null,p_organisation_name:body.organisation_name,p_short_name:body.short_name||null,p_billing_name:body.billing_name||null,p_billing_address_1:body.billing_address_1||null,p_billing_address_2:body.billing_address_2||null,p_town_city:body.town_city||null,p_county_region:body.county_region||null,p_postcode:body.postcode||null,p_country:body.country||null,p_billing_email:body.billing_email||null,p_purchase_order_required:!!body.purchase_order_required,p_purchase_order_instructions:body.purchase_order_instructions||null,p_website_url:body.website_url||null,p_organisation_notes:body.organisation_notes||null,p_sponsor_status:body.sponsor_status,p_sponsor_tier:body.sponsor_tier||null,p_room_allocation:Number(body.room_allocation||0),p_protocol_rep_allowance:Number(body.protocol_rep_allowance||0),p_race_funding_sponsor:!!body.race_funding_sponsor,p_consolidated_invoice_requested:!!body.consolidated_invoice_requested,p_display_in_event_app:!!body.display_in_event_app,p_package_notes:body.package_notes||null,p_sponsor_manager_notes:body.sponsor_manager_notes||null,p_active:!!body.active});
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;button.disabled=false;button.textContent=form.dataset.sponsorId?'Save sponsor':'Create sponsor';return;}
+ state.newSponsor=false;state.selectedSponsorId=data;toast(form.dataset.sponsorId?'Sponsor updated':'Sponsor created');await loadSponsors();
+}
+
+async function saveSponsorContact(event,eventSponsorId){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=form.querySelector('button[type=submit]'),result=document.querySelector('#contactSaveResult');button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const {error}=await supabase.rpc('save_sponsor_contact',{p_event_sponsor_id:eventSponsorId,p_contact_id:form.dataset.contactId||null,p_first_name:body.first_name,p_surname:body.surname,p_job_title:body.job_title||null,p_email:body.email||null,p_mobile:body.mobile||null,p_primary_contact:!!body.primary_contact,p_billing_contact:!!body.billing_contact,p_active:!!body.active,p_notes:body.notes||null});
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;button.disabled=false;button.textContent='Save contact';return;}
+ state.selectedSponsorContactId=null;toast('Sponsor contact saved');await loadSponsors();
+}
+
+async function createSponsorInvitation(event,eventSponsorId){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=form.querySelector('button[type=submit]'),result=document.querySelector('#invitationSaveResult');button.disabled=true;button.textContent='Creating…';result.innerHTML='';
+ const {data,error}=await supabase.rpc('create_sponsor_invitation',{p_event_sponsor_id:eventSponsorId,p_invitee_email:body.invitee_email,p_invitee_name:body.invitee_name||null,p_category:body.category||null,p_role_position:body.role_position||null,p_primary_representative:!!body.primary_representative,p_counts_against_room_allocation:!!body.counts_against_room_allocation,p_intended_package:body.intended_package||null,p_notes:body.notes||null});
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;button.disabled=false;button.textContent='Create invitation';return;}
+ const invite=Array.isArray(data)?data[0]:data;toast('Invitation created');await loadSponsors();if(invite?.invitation_token)await copyInvitationLink(invite.invitation_token);
+}
+
+async function copyInvitationLink(token){
+ const url=`${location.origin}/?invite=${encodeURIComponent(token)}#/register`;
+ try{await navigator.clipboard.writeText(url);toast('Registration link copied');}catch{window.prompt('Copy this registration link',url);}
+}
+
+async function saveSponsorAttendeeLink(event,eventSponsorId){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=form.querySelector('button[type=submit]'),result=form.querySelector('.link-save-result');button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const {error}=await supabase.rpc('save_sponsor_attendee_links',{p_event_sponsor_id:eventSponsorId,p_attendee_id:form.dataset.attendeeId,p_display_as_sponsor:!!body.display_as_sponsor,p_bill_to_sponsor:!!body.bill_to_sponsor,p_consolidated_invoice_included:!!body.consolidated_invoice_included,p_linked_main_attendee_id:body.linked_main_attendee_id||null});
+ if(error){result.innerHTML=`<span class="small error-text">${esc(error.message)}</span>`;button.disabled=false;button.textContent='Save';return;}
+ toast('Attendee billing link saved');await loadSponsors();
 }
 async function loadInvoices(){
  const el=document.querySelector('#invoiceTable');if(!el)return;const {data,error}=await supabase.from('invoices').select('invoice_reference,status,gross_total,issue_date').eq('event_id',EVENT_ID).order('created_at',{ascending:false}).limit(100);
