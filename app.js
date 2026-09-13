@@ -188,7 +188,7 @@ render();
 
 async function initialiseBackend(){
  try{
-  const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2');
+  const {createClient}=await import('/supabase-client.js');
   supabase=createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   const {data:{session}}=await supabase.auth.getSession();state.session=session;await loadProfile();
   supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;await loadProfile();if(state.route==='staff')render();});
