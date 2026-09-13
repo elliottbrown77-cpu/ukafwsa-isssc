@@ -7,7 +7,7 @@ const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
 let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview' };
+const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[] };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -102,7 +102,7 @@ function staffTitle(){return ({overview:'Operational overview',intake:'Registrat
 function staffSubtitle(){return ({overview:'One view of the event workflow.',intake:'Review public attendee requests before they become canonical records.',protocol:'Confirm hotel, room, transfer, lift pass and usage data.',sponsors:'Permanent organisations with event-year sponsorship and invitations.',finance:'Review rates, billing readiness and immutable invoice snapshots.',content:'Publish announcements, programme, venues, biographies and table plans.'})[state.staffTab]}
 function staffPanel(){
 if(state.staffTab==='overview') return `<div class="grid grid-4"><div class="card metric"><strong id="mPending">—</strong><span>Pending registrations</span></div><div class="card metric"><strong id="mAttendees">—</strong><span>Attendees</span></div><div class="card metric"><strong id="mSponsors">—</strong><span>Event sponsors</span></div><div class="card metric"><strong id="mInvoices">—</strong><span>Invoices</span></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Workflow</strong></div><div class="surface-body grid grid-3"><div class="card"><span class="status purple">1</span><h3>Review intake</h3><p>Public form submissions remain requests until Protocol accepts them.</p></div><div class="card"><span class="status purple">2</span><h3>Confirm services</h3><p>Assigned hotel, room, travel, passes and extras become the billable truth.</p></div><div class="card"><span class="status purple">3</span><h3>Issue invoice</h3><p>Finance reviews approved rates and snapshots immutable invoice lines.</p></div></div></div></section>`;
-if(state.staffTab==='intake') return `<div class="surface"><div class="surface-head"><strong>Pending web registrations</strong><button class="btn btn-ghost" id="refreshIntake">Refresh</button></div><div class="surface-body"><div id="intakeTable" class="empty">Loading registrations…</div></div></div>`;
+if(state.staffTab==='intake') return `<div class="surface"><div class="surface-head"><div><strong>Registration review</strong><div class="muted small">Open a request to review every submitted detail before making a decision.</div></div><div class="intake-tools"><label class="small muted" for="intakeFilter">Show</label><select id="intakeFilter"><option value="pending">Pending</option><option value="review_required">Needs follow-up</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="all">All</option></select><button class="btn btn-ghost" id="refreshIntake">Refresh</button></div></div><div class="surface-body"><div id="intakeTable" class="empty">Loading registrations…</div><div id="intakeDetail"></div></div></div>`;
 if(state.staffTab==='protocol') return `<div class="grid grid-3"><div class="card"><div class="icon">🏨</div><h3>Accommodation</h3><p>Manage assigned location, room type, stay segments and approved exceptions.</p></div><div class="card"><div class="icon">🚌</div><h3>Travel & transfers</h3><p>Confirm arrival/departure details and chargeable transfer services.</p></div><div class="card"><div class="icon">🎿</div><h3>Lift passes & usage</h3><p>Confirm pass dates, Carre Neige and daily extras.</p></div></div><section class="section"><div class="notice">The database structures are already in place. The next interface build will add editable attendee records and rate-assisted selectors here.</div></section>`;
 if(state.staffTab==='sponsors') return `<div class="surface"><div class="surface-head"><strong>Event sponsors</strong><button class="btn btn-primary" disabled>Add sponsor</button></div><div class="surface-body"><div id="sponsorTable" class="empty">Loading sponsors…</div></div></div>`;
 if(state.staffTab==='finance') return `<div class="grid grid-3"><div class="card"><span class="status amber">Proposed</span><h3>2027 rate card</h3><p>Rates remain proposed until approved. Unknown VAT is never guessed.</p></div><div class="card"><span class="status green">Protected</span><h3>Invoice snapshots</h3><p>Issued invoice lines preserve quantity, unit price, net, VAT and gross values.</p></div><div class="card"><span class="status purple">Supported</span><h3>Consolidated billing</h3><p>Sponsor invoices can group attendees by billing organisation while retaining attendee breakdown.</p></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Invoices</strong></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div></div></div></section>`;
@@ -124,6 +124,7 @@ function bind(){
   document.querySelectorAll('[data-stafftab]').forEach(b=>b.onclick=()=>{state.staffTab=b.dataset.stafftab;render()});
   const out=document.querySelector('#signOutBtn');if(out) out.onclick=async()=>{await supabase.auth.signOut();state.session=null;state.profile=null;render();};
   const ref=document.querySelector('#refreshIntake');if(ref) ref.onclick=loadIntake;
+  const filter=document.querySelector('#intakeFilter');if(filter){filter.value=state.intakeFilter;filter.onchange=()=>{state.intakeFilter=filter.value;loadIntake()};}
 }
 
 function formObject(form){
@@ -168,9 +169,48 @@ async function loadStaffData(){
 }
 async function loadIntake(){
  const el=document.querySelector('#intakeTable');if(!el)return;el.textContent='Loading registrations…';
- const {data,error}=await supabase.from('intake_submissions').select('id,submitted_at,attendee_email,processing_status,raw_payload').eq('event_id',EVENT_ID).order('submitted_at',{ascending:false}).limit(100);
- if(error){el.innerHTML=`<div class="notice error">${error.message}</div>`;return} if(!data?.length){el.innerHTML='<div class="empty">No registrations yet.</div>';return}
- el.innerHTML=`<div class="table-scroll"><table class="data-table"><thead><tr><th>Attendee</th><th>Category</th><th>Submitted</th><th>Status</th></tr></thead><tbody>${data.map(r=>`<tr><td><strong>${esc(`${r.raw_payload?.first_name||''} ${r.raw_payload?.surname||''}`)}</strong><br><small>${esc(r.attendee_email||'')}</small></td><td>${esc(r.raw_payload?.category||'')}</td><td>${new Date(r.submitted_at).toLocaleString('en-GB')}</td><td><span class="status amber">${esc(r.processing_status)}</span></td></tr>`).join('')}</tbody></table></div>`;
+ let query=supabase.from('intake_submissions').select('id,submitted_at,submitted_on_behalf,submitter_name,submitter_email,attendee_email,processing_status,protocol_reviewed_at,review_notes,mapped_attendee_id,raw_payload').eq('event_id',EVENT_ID).order('submitted_at',{ascending:false}).limit(100);
+ if(state.intakeFilter!=='all')query=query.eq('processing_status',state.intakeFilter);
+ const {data,error}=await query;
+ if(error){el.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;return} if(!data?.length){state.intakeRows=[];el.innerHTML='<div class="empty">No registrations in this view.</div>';return}
+ state.intakeRows=data;
+ el.innerHTML=`<div class="table-scroll"><table class="data-table intake-table"><thead><tr><th>Attendee</th><th>Category</th><th>Submitted</th><th>Status</th><th></th></tr></thead><tbody>${data.map(r=>`<tr><td><strong>${esc(`${r.raw_payload?.first_name||''} ${r.raw_payload?.surname||''}`.trim()||'Unnamed attendee')}</strong><br><small>${esc(r.attendee_email||'')}</small></td><td>${esc(r.raw_payload?.category||'')}</td><td>${new Date(r.submitted_at).toLocaleString('en-GB')}</td><td><span class="status ${statusClass(r.processing_status)}">${esc(statusLabel(r.processing_status))}</span></td><td><button class="btn btn-ghost btn-small" data-review-intake="${r.id}">Review</button></td></tr>`).join('')}</tbody></table></div>`;
+ document.querySelectorAll('[data-review-intake]').forEach(button=>button.onclick=()=>openIntake(button.dataset.reviewIntake));
+}
+
+function statusLabel(status){return ({pending:'Pending',review_required:'Needs follow-up',accepted:'Accepted',rejected:'Rejected',mapped:'Mapped',error:'Error'})[status]||status||'Unknown';}
+function statusClass(status){return ({accepted:'green',rejected:'red',error:'red',review_required:'purple',pending:'amber'})[status]||'purple';}
+function present(value,fallback='Not provided'){return value===true?'Yes':value===false?'No':value?esc(String(value).replace('T',' ')):fallback;}
+function detailRows(rows){return `<dl class="review-grid">${rows.map(([label,value])=>`<div><dt>${esc(label)}</dt><dd>${present(value)}</dd></div>`).join('')}</dl>`;}
+function canReviewIntake(){return ['admin','protocol','operations'].includes(state.profile?.app_role);}
+
+function openIntake(id){
+ const row=state.intakeRows.find(item=>item.id===id),el=document.querySelector('#intakeDetail');if(!row||!el)return;
+ const p=row.raw_payload||{};
+ const actions=canReviewIntake()&&row.processing_status!=='accepted'?`<div class="review-actions"><div class="field"><label for="reviewNotes">Review notes</label><textarea id="reviewNotes" placeholder="Optional internal note">${esc(row.review_notes||'')}</textarea></div><div id="reviewResult"></div><div class="actions"><button class="btn btn-primary" data-intake-decision="accepted">Approve and create attendee</button><button class="btn btn-ghost" data-intake-decision="review_required">Needs follow-up</button><button class="btn btn-danger" data-intake-decision="rejected">Reject</button></div></div>`:`<div class="notice ${row.processing_status==='accepted'?'success':''}">${row.processing_status==='accepted'?'This request has been approved and linked to an attendee record.':'You have read-only access to this registration.'}</div>`;
+ el.innerHTML=`<section class="review-panel"><div class="review-heading"><div><span class="status ${statusClass(row.processing_status)}">${esc(statusLabel(row.processing_status))}</span><h3>${esc(`${p.title_rank||''} ${p.first_name||''} ${p.surname||''}`.trim()||'Registration')}</h3><p>${esc(row.attendee_email||'')}</p></div><button class="btn btn-ghost btn-small" id="closeIntake">Close</button></div>
+ <div class="review-sections"><section><h4>Attendee</h4>${detailRows([['Category',p.category],['Organisation',p.sponsor_name],['Role / appointment',p.role],['Service',p.service],['Discipline',p.discipline],['Mobile',p.mobile],['Post nominals',p.post_nominals]])}</section>
+ <section><h4>Accommodation</h4>${detailRows([['Required',p.accommodation_required],['Hotel preference',p.hotel_preference],['From',p.accommodation_from],['To',p.accommodation_to],['Room share',p.share_room],['Sharing with',p.sharing_with],['Evening meals',p.dinners_required],['Dietary requirements',p.dietary_requirements]])}</section>
+ <section><h4>Arrival</h4>${detailRows([['Method',p.arrival_method],['Airport / station',p.arrival_airport_station],['Travel number',p.arrival_number],['Date and time',p.arrival_datetime],['Expected in resort',p.arrival_resort_datetime],['Transfer requested',p.arrival_transfer]])}</section>
+ <section><h4>Departure</h4>${detailRows([['Method',p.departure_method],['Airport / station',p.departure_airport_station],['Travel number',p.departure_number],['Date and time',p.departure_datetime],['Leave resort',p.departure_resort_datetime],['Transfer requested',p.departure_transfer]])}</section>
+ <section><h4>On snow</h4>${detailRows([['Lift pass',p.lift_pass_required],['Carre Neige',p.carre_neige_required],['First ski day',p.first_ski_day],['Last ski day',p.last_ski_day],['Lessons',p.lessons_required],['Lesson type',p.lesson_type],['Lesson dates',p.lesson_dates],['Equipment hire',p.equipment_hire_required],['Boot size',p.boot_size],['Date of birth',p.date_of_birth]])}</section>
+ <section><h4>Submission</h4>${detailRows([['Submitted',new Date(row.submitted_at).toLocaleString('en-GB')],['On behalf of attendee',row.submitted_on_behalf],['Submitted by',row.submitter_name],['Submitter email',row.submitter_email],['Other information',p.other_information],['Review notes',row.review_notes]])}</section></div>${actions}</section>`;
+ document.querySelector('#closeIntake').onclick=()=>{el.innerHTML='';};
+ document.querySelectorAll('[data-intake-decision]').forEach(button=>button.onclick=()=>reviewIntake(row,button.dataset.intakeDecision));
+ el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+async function reviewIntake(row,decision){
+ if(!canReviewIntake())return;
+ const label=statusLabel(decision);
+ if((decision==='accepted'||decision==='rejected')&&!window.confirm(`${label} this registration?`))return;
+ const result=document.querySelector('#reviewResult'),buttons=[...document.querySelectorAll('[data-intake-decision]')],notes=document.querySelector('#reviewNotes')?.value||null;
+ buttons.forEach(button=>button.disabled=true);result.innerHTML='<div class="notice">Saving review…</div>';
+ const {error}=await supabase.rpc('review_intake_submission',{p_submission_id:row.id,p_decision:decision,p_review_notes:notes});
+ if(error){result.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;buttons.forEach(button=>button.disabled=false);return;}
+ toast(decision==='accepted'?'Attendee created':'Review saved');
+ await loadIntake();
+ const detail=document.querySelector('#intakeDetail');if(detail)detail.innerHTML=`<div class="notice success">${decision==='accepted'?'Registration approved and attendee created.':'Registration marked as '+esc(statusLabel(decision).toLowerCase())+'.'}</div>`;
 }
 async function loadSponsors(){
  const el=document.querySelector('#sponsorTable');if(!el)return;const {data,error}=await supabase.from('event_sponsors').select('id,sponsor_status,room_allocation,active,organisations(organisation_name,short_name)').eq('event_id',EVENT_ID).order('created_at');
