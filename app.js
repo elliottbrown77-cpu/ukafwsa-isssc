@@ -1,9 +1,7 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
 const SUPABASE_URL = 'https://apugxrwhiyvwcrpzvgxj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_WoZaQe5QeUDLb764uMWEtw_78rsp8Mi';
 const EVENT_ID = '9c1c1d5e-d9f1-4f6b-b323-f3c35261fc19';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+let supabase = null;
 
 const state = { route: location.hash.replace('#/','') || 'home', session:null, profile:null, staffTab:'overview' };
 const app = document.querySelector('#app');
@@ -132,6 +130,7 @@ function formObject(form){
 }
 async function submitRegistration(e){
  e.preventDefault();const form=e.currentTarget;const btn=document.querySelector('#submitRegistration');const result=document.querySelector('#formResult');
+ if(!supabase){result.innerHTML='<div class="notice error">The secure registration service is still connecting. Please wait a moment and try again.</div>';return}
  const body=formObject(form);if(body.website){form.reset();result.innerHTML='<div class="notice success">Thank you.</div>';return}
  btn.disabled=true;btn.textContent='Submitting…';result.innerHTML='';
  const row={event_id:EVENT_ID,source:'web',invitation_code:new URLSearchParams(location.search).get('invite'),submitted_on_behalf:!!body.submitted_on_behalf,submitter_name:body.submitted_on_behalf?body.proxy_name:`${body.first_name} ${body.surname}`,submitter_email:body.submitted_on_behalf?body.proxy_email:body.email,attendee_email:body.email,processing_status:'pending',mapping_version:'web_v1',raw_payload:body};
@@ -141,6 +140,7 @@ async function submitRegistration(e){
 }
 async function sendLoginLink(e){
  e.preventDefault();const email=new FormData(e.currentTarget).get('email');const box=document.querySelector('#loginResult');box.innerHTML='<div class="notice">Sending secure sign-in link…</div>';
+ if(!supabase){box.innerHTML='<div class="notice error">The secure sign-in service is still connecting. Please wait a moment and try again.</div>';return}
  const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:`${location.origin}/#/staff`}});
  box.innerHTML=error?`<div class="notice error">${error.message}</div>`:'<div class="notice success">Check your email for the secure sign-in link.</div>';
 }
@@ -181,7 +181,23 @@ async function loadInvoices(){
 function esc(v=''){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 
 window.addEventListener('hashchange',()=>{state.route=location.hash.replace('#/','')||'home';render()});
-const {data:{session}}=await supabase.auth.getSession();state.session=session;await loadProfile();
-supabase.auth.onAuthStateChange(async(_event,session)=>{state.session=session;await loadProfile();if(state.route==='staff')render();});
+
+// Render the public experience before connecting to the remote data service.
+// This prevents a slow or blocked dependency/session request from leaving a blank page.
 render();
+
+async function initialiseBackend(){
+ try{
+  const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2');
+  supabase=createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+  const {data:{session}}=await supabase.auth.getSession();state.session=session;await loadProfile();
+  supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;await loadProfile();if(state.route==='staff')render();});
+  if(state.route==='staff')render();
+ }catch(error){
+  console.error('Secure service connection failed',error);
+  if(state.route==='staff')toast('The secure staff service is currently unavailable.');
+ }
+}
+
+initialiseBackend();
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
