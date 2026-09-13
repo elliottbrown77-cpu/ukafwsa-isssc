@@ -1,6 +1,8 @@
 const SUPABASE_URL = 'https://apugxrwhiyvwcrpzvgxj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_WoZaQe5QeUDLb764uMWEtw_78rsp8Mi';
 const EVENT_ID = '9c1c1d5e-d9f1-4f6b-b323-f3c35261fc19';
+const TRAVEL_DATE_START = '2027-01-27';
+const TRAVEL_DATE_END = '2027-02-09';
 let supabase = null;
 
 const ROUTES = new Set(['home','register','event','staff']);
@@ -65,12 +67,12 @@ return `<div class="hero-mini"><span class="eyebrow">Attendance request</span><h
 <div class="field"><label>Evening meal preference</label><select name="dinners_required">${opts(['Dinner with event guests each night','B&B only / no event dinner','Not sure'])}</select></div><div class="field"><label>Dietary requirements</label><textarea name="dietary_requirements" placeholder="Only information needed to support your attendance"></textarea></div>
 <div class="form-section"><h3>Arrival</h3><p>Travel details help Protocol coordinate transfers.</p></div>
 <div class="field"><label>Method</label><select name="arrival_method">${opts(['Flight','Train','Drive','Coach','Other'])}</select></div><div class="field"><label>Airport / station</label><input name="arrival_airport_station"></div>
-<div class="field"><label>Flight / travel number</label><input name="arrival_number"></div><div class="field"><label>Arrival date & time</label><input type="datetime-local" name="arrival_datetime"></div>
-<div class="field"><label>Expected time in resort</label><input type="datetime-local" name="arrival_resort_datetime"></div><div class="field checkbox"><input type="checkbox" name="arrival_transfer" id="arrTransfer"><label for="arrTransfer">Request UKAFWSA arrival transfer</label></div>
+<div class="field"><label>Flight / travel number</label><input name="arrival_number"></div>${dateTimeField('arrival_datetime','Arrival date and time','','')}
+${dateTimeField('arrival_resort_datetime','Expected in resort date and time','','')}<div class="field checkbox"><input type="checkbox" name="arrival_transfer" id="arrTransfer"><label for="arrTransfer">Request UKAFWSA arrival transfer</label></div>
 <div class="form-section"><h3>Departure</h3></div>
 <div class="field"><label>Method</label><select name="departure_method">${opts(['Flight','Train','Drive','Coach','Other'])}</select></div><div class="field"><label>Airport / station</label><input name="departure_airport_station"></div>
-<div class="field"><label>Flight / travel number</label><input name="departure_number"></div><div class="field"><label>Departure date & time</label><input type="datetime-local" name="departure_datetime"></div>
-<div class="field"><label>Leave resort</label><input type="datetime-local" name="departure_resort_datetime"></div><div class="field checkbox"><input type="checkbox" name="departure_transfer" id="depTransfer"><label for="depTransfer">Request UKAFWSA departure transfer</label></div>
+<div class="field"><label>Flight / travel number</label><input name="departure_number"></div>${dateTimeField('departure_datetime','Departure date and time','','')}
+${dateTimeField('departure_resort_datetime','Leave resort date and time','','')}<div class="field checkbox"><input type="checkbox" name="departure_transfer" id="depTransfer"><label for="depTransfer">Request UKAFWSA departure transfer</label></div>
 <div class="form-section"><h3>On snow</h3></div>
 <div class="field checkbox"><input type="checkbox" name="lift_pass_required" id="lift"><label for="lift">I require a 3 Vallées lift pass</label></div><div class="field checkbox"><input type="checkbox" checked name="carre_neige_required" id="carre"><label for="carre">Carre Neige requested</label></div>
 <div class="field"><label>First ski day</label><input type="date" min="2027-01-30" max="2027-02-06" name="first_ski_day"></div><div class="field"><label>Last ski day</label><input type="date" min="2027-01-30" max="2027-02-06" name="last_ski_day"></div>
@@ -139,6 +141,10 @@ async function submitRegistration(e){
  e.preventDefault();const form=e.currentTarget;const btn=document.querySelector('#submitRegistration');const result=document.querySelector('#formResult');
  if(!supabase){result.innerHTML='<div class="notice error">The secure registration service is still connecting. Please wait a moment and try again.</div>';return}
  const body=formObject(form);if(body.website){form.reset();result.innerHTML='<div class="notice success">Thank you.</div>';return}
+ const registrationDateTimes=[['arrival_datetime','arrival'],['arrival_resort_datetime','expected resort arrival'],['departure_datetime','departure'],['departure_resort_datetime','resort departure']];
+ const incomplete=registrationDateTimes.find(([name])=>incompleteDateTime(body,name));
+ if(incomplete){result.innerHTML=`<div class="notice error">Choose both a date and time for the ${incomplete[1]}.</div>`;return;}
+ registrationDateTimes.forEach(([name])=>{body[name]=joinedDateTime(body,name);delete body[`${name}_date`];delete body[`${name}_time`];});
  btn.disabled=true;btn.textContent='Submitting…';result.innerHTML='';
  const row={event_id:EVENT_ID,source:'web',invitation_code:new URLSearchParams(location.search).get('invite'),submitted_on_behalf:!!body.submitted_on_behalf,submitter_name:body.submitted_on_behalf?body.proxy_name:`${body.first_name} ${body.surname}`,submitter_email:body.submitted_on_behalf?body.proxy_email:body.email,attendee_email:body.email,processing_status:'pending',mapping_version:'web_v1',raw_payload:body};
  const {error}=await supabase.from('intake_submissions').insert(row);
@@ -288,6 +294,29 @@ function dateTimeLocalValue(value){
  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 function eventTimestamp(value){return value?`${value}${value.length===16?':00':''}+01:00`:null;}
+function dateRange(start,end){
+ const dates=[],cursor=new Date(`${start}T00:00:00Z`),last=new Date(`${end}T00:00:00Z`);
+ while(cursor<=last){dates.push(cursor.toISOString().slice(0,10));cursor.setUTCDate(cursor.getUTCDate()+1);}
+ return dates;
+}
+const TRAVEL_DATES=dateRange(TRAVEL_DATE_START,TRAVEL_DATE_END);
+function displayEventDate(value){
+ const date=new Date(`${value}T00:00:00Z`);
+ return Number.isNaN(date.getTime())?value:new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',weekday:'short',day:'numeric',month:'short',year:'numeric'}).format(date);
+}
+function eventDateOptions(current){
+ const dates=current&&!TRAVEL_DATES.includes(current)?[current,...TRAVEL_DATES]:TRAVEL_DATES;
+ return `<option value="">Select date…</option>${dates.map(date=>`<option value="${date}" ${date===current?'selected':''}>${esc(displayEventDate(date))}${!TRAVEL_DATES.includes(date)?' · outside event window':''}</option>`).join('')}`;
+}
+function dateTimeField(name,label,value,disabled){
+ const local=dateTimeLocalValue(value),date=local.slice(0,10),time=local.slice(11,16);
+ return `<div class="field"><label>${label}</label><div class="date-time-pair"><select name="${name}_date" aria-label="${label} date"${disabled}>${eventDateOptions(date)}</select><input type="time" step="300" name="${name}_time" aria-label="${label} time" value="${esc(time)}"${disabled}></div><small>27 Jan–9 Feb 2027</small></div>`;
+}
+function joinedDateTime(body,name){
+ const date=body[`${name}_date`]||'',time=body[`${name}_time`]||'';
+ return date&&time?`${date}T${time}`:null;
+}
+function incompleteDateTime(body,name){return !!body[`${name}_date`]!==!!body[`${name}_time`];}
 function money(value){return value==null?'—':`£${Number(value).toFixed(2)}`;}
 function lookupOptions(rows,current,label,placeholder='Select…'){
  const items=current&&!rows.some(row=>row.id===current)?[{id:current,name:'Current selection'},...rows]:rows;
@@ -326,12 +355,12 @@ function travelForm(direction,record,request){
  const editable=canEditProtocol(),disabled=editable?'':' disabled',title=direction==='arrival'?'Arrival':'Departure';
  const key=direction==='arrival'?'arrival':'departure';
  const method=record?(record.method_of_transport||''):(request[`${key}_method`]||''),point=record?(record.airport_station||''):(request[`${key}_airport_station`]||''),number=record?(record.flight_travel_number||''):(request[`${key}_number`]||'');
- const travelTime=dateTimeLocalValue(record?(record.travel_datetime||''):(request[`${key}_datetime`]||'')),resortTime=dateTimeLocalValue(record?(record.resort_datetime||''):(request[`${key}_resort_datetime`]||''));
+ const travelTime=record?(record.travel_datetime||''):(request[`${key}_datetime`]||''),resortTime=record?(record.resort_datetime||''):(request[`${key}_resort_datetime`]||'');
  const transfer=record?record.transfer_requested:!!request[`${key}_transfer`];
  return `<form class="service-form travel-form" data-direction="${direction}"><div class="service-form-head"><div><span class="status ${record?.protocol_confirmed?'green':'amber'}">${record?.protocol_confirmed?'Confirmed':'Draft'}</span><strong>${title}</strong></div>${record?.billing_reviewed?'<small>Billing reviewed</small>':''}</div>
  <div class="form-grid compact-grid"><div class="field"><label>Method</label><select name="method_of_transport"${disabled}>${selectedOptions(['Flight','Train','Drive','Coach','Other'],method)}</select></div><div class="field"><label>Airport / station</label><input name="airport_station" value="${esc(point)}"${disabled}></div>
- <div class="field"><label>Flight / travel number</label><input name="flight_travel_number" value="${esc(number)}"${disabled}></div><div class="field"><label>${title} local date and time</label><input type="datetime-local" name="travel_datetime" value="${esc(travelTime)}"${disabled}></div>
- <div class="field"><label>${direction==='arrival'?'Expected in resort':'Leave resort'} local time</label><input type="datetime-local" name="resort_datetime" value="${esc(resortTime)}"${disabled}></div><div class="field"><label>Special transfer time</label><input type="datetime-local" name="special_transfer_datetime" value="${esc(dateTimeLocalValue(record?.special_transfer_datetime||''))}"${disabled}></div>
+ <div class="field"><label>Flight / travel number</label><input name="flight_travel_number" value="${esc(number)}"${disabled}></div>${dateTimeField('travel_datetime',`${title} local date and time`,travelTime,disabled)}
+ ${dateTimeField('resort_datetime',`${direction==='arrival'?'Expected in resort':'Leave resort'} local date and time`,resortTime,disabled)}${dateTimeField('special_transfer_datetime','Special transfer date and time',record?.special_transfer_datetime||'',disabled)}
  <div class="field checkbox"><input type="checkbox" name="transfer_requested" ${transfer?'checked':''}${disabled}><label>UKAFWSA transfer required</label></div><div class="field"><label>Transfer service</label><select name="transfer_service"${disabled}>${selectedOptions(['Shared coach','Shared taxi','Private taxi','Own transport','Not required','Other'],record?.transfer_service||'')}</select></div>
  <div class="field checkbox"><input type="checkbox" name="transfer_chargeable" ${record?.transfer_chargeable?'checked':''}${disabled}><label>Chargeable transfer</label></div><div class="field checkbox"><input type="checkbox" name="protocol_confirmed" ${record?.protocol_confirmed?'checked':''}${disabled}><label>Protocol confirmed</label></div>
  <div class="field full"><label>Assignment notes</label><textarea name="assignment_notes"${disabled}>${esc(record?.assignment_notes||'')}</textarea></div></div>
@@ -382,7 +411,10 @@ function saveProtocolStay(event,attendeeId){
 }
 function saveProtocolTravel(event,attendeeId){
  event.preventDefault();const form=event.currentTarget,body=formObject(form),direction=form.dataset.direction;
- return serviceSave(form,'save_protocol_travel',{p_attendee_id:attendeeId,p_direction:direction,p_method_of_transport:body.method_of_transport||null,p_airport_station:body.airport_station||null,p_flight_travel_number:body.flight_travel_number||null,p_travel_datetime:eventTimestamp(body.travel_datetime),p_resort_datetime:eventTimestamp(body.resort_datetime),p_transfer_requested:!!body.transfer_requested,p_transfer_service:body.transfer_service||null,p_transfer_chargeable:!!body.transfer_chargeable,p_special_transfer_datetime:eventTimestamp(body.special_transfer_datetime),p_assignment_notes:body.assignment_notes||null,p_protocol_confirmed:!!body.protocol_confirmed},`${direction==='arrival'?'Arrival':'Departure'} saved`,attendeeId);
+ const dateTimes=[['travel_datetime',direction==='arrival'?'arrival':'departure'],['resort_datetime',direction==='arrival'?'expected resort arrival':'resort departure'],['special_transfer_datetime','special transfer']];
+ const incomplete=dateTimes.find(([name])=>incompleteDateTime(body,name));
+ if(incomplete){form.querySelector('.service-save-result').innerHTML=`<div class="notice error">Choose both a date and time for the ${incomplete[1]}.</div>`;return;}
+ return serviceSave(form,'save_protocol_travel',{p_attendee_id:attendeeId,p_direction:direction,p_method_of_transport:body.method_of_transport||null,p_airport_station:body.airport_station||null,p_flight_travel_number:body.flight_travel_number||null,p_travel_datetime:eventTimestamp(joinedDateTime(body,'travel_datetime')),p_resort_datetime:eventTimestamp(joinedDateTime(body,'resort_datetime')),p_transfer_requested:!!body.transfer_requested,p_transfer_service:body.transfer_service||null,p_transfer_chargeable:!!body.transfer_chargeable,p_special_transfer_datetime:eventTimestamp(joinedDateTime(body,'special_transfer_datetime')),p_assignment_notes:body.assignment_notes||null,p_protocol_confirmed:!!body.protocol_confirmed},`${direction==='arrival'?'Arrival':'Departure'} saved`,attendeeId);
 }
 function saveProtocolLift(event,attendeeId){
  event.preventDefault();const form=event.currentTarget,body=formObject(form);
