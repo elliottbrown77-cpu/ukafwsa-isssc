@@ -1,29 +1,37 @@
-# UKAF WSA / ISSSC Event Platform v0.2
+# UKAF WSA — ISSSC 2027 web platform v0.4.1
 
-Static progressive web application for ISSSC 2027, designed for Netlify with Supabase as the secure backend.
+Static progressive web application for the Inter Service Snow Sports Championships 2027, backed by the dedicated Supabase ISSSC project and designed for Netlify.
+
+## Included
+
+- Public ISSSC landing page and live event app
+- Invitation-led native attendee registration, including privacy acknowledgement
+- Secure attendee **My trip** view for request status, confirmed accommodation, travel, lift pass, seating and issued invoices
+- Passwordless staff authentication
+- Admin user and role management with audit-log review
+- Sponsor Manager workspace, named invitation generation and invitation status tracking
+- Protocol intake with accept/decline review and server-validated canonical attendee operations
+- Finance readiness, rate approval, individual and consolidated invoices, invoice status, adjustments, payment links and print/PDF output
+- Event content management for announcements, programme, venues, biographies, documents, table plans and structured seating, including live edits/publish controls
+- Public asset uploads to Supabase Storage
+- PWA/offline shell
+- Privacy notice
+- Netlify redirects and security headers
 
 ## Architecture
-- Netlify: public/staff web app hosting and future custom domain
-- Supabase: authentication, PostgreSQL database, RLS, audit and Edge Functions
-- Jotform: retired from the target architecture
 
-## Current workflows
-- Invitation-only native attendance form
-- Attendee event app: updates, programme, locations, biographies, table plans, documents and sponsors
-- Sponsor Manager: permanent sponsor organisations, annual participation and named invitations
-- Protocol: review requests, accept attendees, confirm stays/travel/lift passes and mark data checked
-- Finance: invoice readiness, 2027 rate card and secure draft invoice build
-- Content Manager: announcements, programme items and venues
-- Role-based access with Supabase Auth + RLS
-- PWA manifest and offline shell
+- **Netlify** — public and staff web application hosting
+- **Supabase Auth** — passwordless sign-in
+- **Supabase PostgreSQL** — canonical event, attendance and billing data
+- **Supabase RLS** — browser data-access boundary
+- **Supabase Edge Functions** — privileged Protocol, Finance and booking workflows
+- **Supabase Storage** — controlled public event assets
+- **GitHub** — source control and continuous Netlify deployment
 
-## Hosting
-The Netlify project is `ukafwsa-isssc` (site ID `e7588b1b-a3fd-4fda-9839-fa2859080e30`).
+No service-role key is present in the browser. Privileged mutations are performed by authenticated Edge Functions and service-only database functions.
 
-This build is static and requires no build command. Publish the repository root.
+## Deployment
 
-## Security notes
-- Supabase publishable key is intentionally safe for browser use; RLS is the security boundary.
-- Service-role credentials are only used inside Supabase Edge Functions.
-- Issued/closed invoice financial fields and invoice lines are database-locked.
-- Retired Jotform tables remain RLS-locked with no client policies.
+The application is static and requires no frontend build command. Publish the repository root. `netlify.toml` supplies the SPA fallback and security headers.
+
+Supabase Auth must allow the production Netlify origin as a redirect URL for passwordless sign-in. The connected project-owner account is allowlisted as the initial administrator; other staff roles are assigned from the User access workspace after first sign-in.
