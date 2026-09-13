@@ -3,7 +3,11 @@ const SUPABASE_KEY = 'sb_publishable_WoZaQe5QeUDLb764uMWEtw_78rsp8Mi';
 const EVENT_ID = '9c1c1d5e-d9f1-4f6b-b323-f3c35261fc19';
 let supabase = null;
 
-const state = { route: location.hash.replace('#/','') || 'home', session:null, profile:null, staffTab:'overview' };
+const ROUTES = new Set(['home','register','event','staff']);
+const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
+let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
+const hashRoute = location.hash.replace('#/','');
+const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview' };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -141,7 +145,7 @@ async function submitRegistration(e){
 async function sendLoginLink(e){
  e.preventDefault();const email=new FormData(e.currentTarget).get('email');const box=document.querySelector('#loginResult');box.innerHTML='<div class="notice">Sending secure sign-in link…</div>';
  if(!supabase){box.innerHTML='<div class="notice error">The secure sign-in service is still connecting. Please wait a moment and try again.</div>';return}
- const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:`${location.origin}/#/staff`}});
+ const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:`${location.origin}/?next=staff`}});
  box.innerHTML=error?`<div class="notice error">${error.message}</div>`:'<div class="notice success">Check your email for the secure sign-in link.</div>';
 }
 async function loadProfile(){
@@ -180,7 +184,15 @@ async function loadInvoices(){
 }
 function esc(v=''){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 
-window.addEventListener('hashchange',()=>{state.route=location.hash.replace('#/','')||'home';render()});
+window.addEventListener('hashchange',()=>{
+ if(authLanding && !location.hash.startsWith('#/')) return;
+ const route=location.hash.replace('#/','');state.route=ROUTES.has(route)?route:'home';render();
+});
+
+function finishAuthLanding(){
+ if(!authLanding)return;
+ authLanding=false;state.route='staff';history.replaceState(null,'',`${location.pathname}#/staff`);
+}
 
 // Render the public experience before connecting to the remote data service.
 // This prevents a slow or blocked dependency/session request from leaving a blank page.
@@ -190,8 +202,8 @@ async function initialiseBackend(){
  try{
   const {createClient}=await import('/supabase-client.js');
   supabase=createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
-  const {data:{session}}=await supabase.auth.getSession();state.session=session;await loadProfile();
-  supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;await loadProfile();if(state.route==='staff')render();});
+  const {data:{session}}=await supabase.auth.getSession();state.session=session;if(session)finishAuthLanding();await loadProfile();
+  supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;if(nextSession)finishAuthLanding();await loadProfile();if(state.route==='staff')render();});
   if(state.route==='staff')render();
  }catch(error){
   console.error('Secure service connection failed',error);
