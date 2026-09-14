@@ -32,7 +32,7 @@ export function createRoomAllocator({client,eventId,getProfile,escapeHtml,toast}
         client.from('room_allocation_requests').select('*').eq('event_id',eventId).order('created_at'),
         client.from('hotel_rooms').select('*').eq('event_id',eventId).order('sort_order'),
         client.from('hotel_room_allocations').select('*').eq('event_id',eventId).order('decided_at',{ascending:false}),
-        client.from('accommodation_locations').select('id,name').eq('event_id',eventId).order('name'),
+        client.from('accommodation_locations').select('id,name').eq('active',true).order('name'),
         client.from('attendees').select('id,title_rank,first_name,surname,email,mobile,category,display_company,record_source,attendance_status').eq('event_id',eventId).neq('attendance_status','cancelled').order('surname').order('first_name')
       ]);
       const failed=[requests,rooms,allocations,locations,attendees].find(result=>result.error);
