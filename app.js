@@ -11,6 +11,7 @@ let supabase = null;
 let eventFeature = null;
 let roomAllocator = null;
 let adminSettings = null;
+let pendingLoginEmail = sessionStorage.getItem('isssc-staff-login-email') || '';
 
 const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
@@ -99,7 +100,10 @@ return eventFeature ? eventFeature.publicMarkup() : `<div class="hero-mini"><spa
 }
 
 function staffLogin(){
-return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Staff portal</h2><div class="muted">Protocol · Notifications · Sponsor · Finance · Content</div></div></div><p class="muted">Enter your authorised email address and we will send you a secure sign-in link.</p><form id="loginForm" class="form-grid"><div class="field full"><label>Email</label><input name="email" type="email" required placeholder="name@example.com"></div><div class="field full"><button class="btn btn-primary" type="submit">Send sign-in link</button></div><div id="loginResult" class="field full"></div></form></div>`;
+if(pendingLoginEmail){
+return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Enter your sign-in code</h2><div class="muted">Staff portal</div></div></div><p class="muted">We sent a six-digit code to <strong>${esc(pendingLoginEmail)}</strong>. Enter it below; this avoids security scanners consuming one-use email links.</p><form id="otpForm" class="form-grid"><div class="field full"><label>Six-digit code</label><input name="token" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required placeholder="000000"></div><div class="field full"><button class="btn btn-primary" type="submit">Sign in</button></div><div id="loginResult" class="field full"></div></form><div class="actions"><button class="btn btn-ghost btn-small" id="resendLoginCode" type="button">Send a new code</button><button class="btn btn-ghost btn-small" id="changeLoginEmail" type="button">Use a different email</button></div></div>`;
+}
+return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Staff portal</h2><div class="muted">Protocol · Notifications · Sponsor · Finance · Content</div></div></div><p class="muted">Enter your authorised email address and we will send you a secure six-digit sign-in code.</p><form id="loginForm" class="form-grid"><div class="field full"><label>Email</label><input name="email" type="email" autocomplete="email" required placeholder="name@example.com"></div><div class="field full"><button class="btn btn-primary" type="submit">Send sign-in code</button></div><div id="loginResult" class="field full"></div></form></div>`;
 }
 function staffDashboard(){
 const role=state.profile?.app_role || 'authenticated';
@@ -149,6 +153,9 @@ function bind(){
   const ob=document.querySelector('#onBehalf');if(ob) ob.onchange=()=>document.querySelectorAll('.proxy').forEach(x=>x.classList.toggle('hidden',!ob.checked));
   const reg=document.querySelector('#registrationForm');if(reg) reg.addEventListener('submit',submitRegistration);
   const login=document.querySelector('#loginForm');if(login) login.addEventListener('submit',sendLoginLink);
+  const otp=document.querySelector('#otpForm');if(otp)otp.addEventListener('submit',verifyLoginCode);
+  const resend=document.querySelector('#resendLoginCode');if(resend)resend.onclick=resendLoginCode;
+  const changeEmail=document.querySelector('#changeLoginEmail');if(changeEmail)changeEmail.onclick=()=>{pendingLoginEmail='';sessionStorage.removeItem('isssc-staff-login-email');render()};
   document.querySelectorAll('[data-stafftab]').forEach(b=>b.onclick=()=>{state.staffTab=b.dataset.stafftab;render()});
   document.querySelectorAll('[data-overview-target]').forEach(b=>b.onclick=()=>openOverviewTarget(b));
   document.querySelectorAll('[data-protocol-section]').forEach(b=>b.onclick=()=>{state.protocolSection=b.dataset.protocolSection;state.manualPersonOpen=false;render()});
@@ -199,10 +206,25 @@ async function submitRegistration(e){
  form.reset();result.innerHTML='<div class="notice success"><strong>Registration received.</strong> Protocol will review your request and confirm the operational details separately.</div>';btn.textContent='Submitted';toast('Attendance request received');
 }
 async function sendLoginLink(e){
- e.preventDefault();const email=new FormData(e.currentTarget).get('email');const box=document.querySelector('#loginResult');box.innerHTML='<div class="notice">Sending secure sign-in link…</div>';
+ e.preventDefault();const email=String(new FormData(e.currentTarget).get('email')||'').trim().toLowerCase();const box=document.querySelector('#loginResult');box.innerHTML='<div class="notice">Sending secure sign-in code…</div>';
  if(!supabase){box.innerHTML='<div class="notice error">The secure sign-in service is still connecting. Please wait a moment and try again.</div>';return}
- const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:`${location.origin}/?next=staff`}});
- box.innerHTML=error?`<div class="notice error">${error.message}</div>`:'<div class="notice success">Check your email for the secure sign-in link.</div>';
+ const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:`${location.origin}/?next=staff`,shouldCreateUser:true}});
+ if(error){box.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;return}
+ pendingLoginEmail=email;sessionStorage.setItem('isssc-staff-login-email',email);render();
+ const result=document.querySelector('#loginResult');if(result)result.innerHTML='<div class="notice success">Code sent. Check your email and enter the six digits above.</div>';
+}
+async function verifyLoginCode(e){
+ e.preventDefault();const form=e.currentTarget,token=String(new FormData(form).get('token')||'').replace(/\s/g,'');const box=document.querySelector('#loginResult'),button=form.querySelector('[type="submit"]');
+ if(!supabase){box.innerHTML='<div class="notice error">The secure sign-in service is still connecting. Please wait a moment and try again.</div>';return}
+ button.disabled=true;button.textContent='Signing in…';box.innerHTML='';
+ const {data,error}=await supabase.auth.verifyOtp({email:pendingLoginEmail,token,type:'email'});
+ if(error||!data.session){box.innerHTML='<div class="notice error">That code is invalid or has expired. Send a new code and try again.</div>';button.disabled=false;button.textContent='Sign in';return}
+ pendingLoginEmail='';sessionStorage.removeItem('isssc-staff-login-email');state.session=data.session;finishAuthLanding();await loadProfile();render();
+}
+async function resendLoginCode(){
+ const box=document.querySelector('#loginResult');box.innerHTML='<div class="notice">Sending a new code…</div>';
+ const {error}=await supabase.auth.signInWithOtp({email:pendingLoginEmail,options:{emailRedirectTo:`${location.origin}/?next=staff`,shouldCreateUser:true}});
+ box.innerHTML=error?`<div class="notice error">${esc(error.message)}</div>`:'<div class="notice success">A new code has been sent.</div>';
 }
 async function loadProfile(){
  if(!state.session){state.profile=null;return}

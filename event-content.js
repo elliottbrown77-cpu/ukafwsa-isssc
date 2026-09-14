@@ -9,6 +9,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     plans: [], tables: [], assignments: [], transfers: [], passengers: [],
     attendees: [], sponsors: [], notificationDeliveries: [],
     pushStatus: null, pushEnabled: false, pushSupported: true, notificationResult: null,
+    pendingLoginEmail: sessionStorage.getItem('isssc-event-login-email') || '',
     selected: {},
   };
 
@@ -56,9 +57,82 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     if (target) target.innerHTML = `<div class="notice ${type}">${esc(text)}</div>`;
   };
 
+  const emailCodeForm = (className = 'notification-login') => `<form class="event-otp-form ${className}">
+    <input type="text" name="token" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-label="Six-digit sign-in code" placeholder="000000">
+    <button class="btn btn-primary btn-small" type="submit">Sign in</button>
+    <div class="service-save-result"></div>
+    <div class="actions"><button class="btn btn-ghost btn-small event-resend-code" type="button">Send a new code</button><button class="btn btn-ghost btn-small event-change-email" type="button">Use a different email</button></div>
+  </form>`;
+
+  function notificationLoginMarkup() {
+    if (getSession()) return '<div><strong>Event alerts</strong><p>Checking browser notification settings...</p></div>';
+    if (state.pendingLoginEmail) return `<div><strong>Enter your sign-in code</strong><p>We sent six digits to ${esc(state.pendingLoginEmail)}.</p></div>${emailCodeForm('notification-login')}`;
+    return '<div><strong>Event alerts</strong><p>Sign in to enable urgent changes and operational notices on this device.</p></div><form id="notificationLoginForm" class="notification-login"><input type="email" name="email" required aria-label="Email address" placeholder="name@example.com"><button class="btn btn-primary btn-small" type="submit">Send sign-in code</button><div class="service-save-result"></div></form>';
+  }
+
+  async function sendEmailCode(email, result) {
+    const normalisedEmail = String(email || '').trim().toLowerCase();
+    message(result, 'Sending secure sign-in code...', '');
+    const response = await client.auth.signInWithOtp({
+      email: normalisedEmail,
+      options: { emailRedirectTo: `${location.origin}/?next=event`, shouldCreateUser: true },
+    });
+    if (response.error) {
+      message(result, response.error.message);
+      return false;
+    }
+    state.pendingLoginEmail = normalisedEmail;
+    sessionStorage.setItem('isssc-event-login-email', normalisedEmail);
+    return true;
+  }
+
+  async function verifyEmailCode(form) {
+    const result = form.querySelector('.service-save-result');
+    const button = form.querySelector('button[type="submit"]');
+    const token = String(new FormData(form).get('token') || '').replace(/\s/g, '');
+    button.disabled = true;
+    button.textContent = 'Signing in...';
+    const response = await client.auth.verifyOtp({ email: state.pendingLoginEmail, token, type: 'email' });
+    if (response.error || !response.data.session) {
+      message(result, 'That code is invalid or has expired. Send a new code and try again.');
+      button.disabled = false;
+      button.textContent = 'Sign in';
+      return;
+    }
+    state.pendingLoginEmail = '';
+    sessionStorage.removeItem('isssc-event-login-email');
+    message(result, 'Signed in. Loading your event information...', 'success');
+    toast('Signed in successfully');
+  }
+
+  function bindEmailCodeControls(root = document) {
+    root.querySelectorAll('.event-otp-form').forEach(form => {
+      form.onsubmit = async event => { event.preventDefault(); await verifyEmailCode(form); };
+    });
+    root.querySelectorAll('.event-resend-code').forEach(button => {
+      button.onclick = async () => {
+        const form = button.closest('.event-otp-form');
+        const result = form.querySelector('.service-save-result');
+        button.disabled = true;
+        const sent = await sendEmailCode(state.pendingLoginEmail, result);
+        if (sent) message(result, 'A new code has been sent.', 'success');
+        button.disabled = false;
+      };
+    });
+    root.querySelectorAll('.event-change-email').forEach(button => {
+      button.onclick = () => {
+        state.pendingLoginEmail = '';
+        sessionStorage.removeItem('isssc-event-login-email');
+        const optIn = document.querySelector('#notificationOptIn');
+        if (optIn) { optIn.innerHTML = notificationLoginMarkup(); bindNotificationOptIn(); }
+        renderPublicContent();
+      };
+    });
+  }
+
   function publicMarkup() {
     return `<div class="hero-mini event-app-hero"><span class="eyebrow">Event app</span><h2>ISSSC 2027 in Méribel</h2><p>Live programme, race locations, results, coverage and operational information.</p></div>
-    <section id="notificationOptIn" class="notification-opt-in">${getSession() ? '<div><strong>Event alerts</strong><p>Checking browser notification settings...</p></div>' : '<div><strong>Event alerts</strong><p>Sign in to enable urgent changes and operational notices on this device.</p></div><form id="notificationLoginForm" class="notification-login"><input type="email" name="email" required aria-label="Email address" placeholder="name@example.com"><button class="btn btn-primary btn-small" type="submit">Send sign-in link</button><div class="service-save-result"></div></form>'}</section>
+    <section id="notificationOptIn" class="notification-opt-in">${notificationLoginMarkup()}</section>
     <div class="event-app-nav" role="navigation" aria-label="Event information">
       ${[['today','Today'],['programme','Programme'],['locations','Locations'],['results','Results'],['media','Media'],['coverage','BFBS'],['tables','Table plans'],['transfers','Transfers']].map(([id,label]) => `<button class="${state.publicSection === id ? 'active' : ''}" data-event-section="${id}">${label}</button>`).join('')}
     </div>
@@ -119,10 +193,15 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
       const result = login.querySelector('.service-save-result'), button = login.querySelector('button');
       button.disabled = true; button.textContent = 'Sending...';
       const email = new FormData(login).get('email');
-      const response = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/?next=event` } });
-      message(result, response.error ? response.error.message : 'Check your email for the secure sign-in link.', response.error ? 'error' : 'success');
-      button.disabled = false; button.textContent = 'Send sign-in link';
+      const sent = await sendEmailCode(email, result);
+      button.disabled = false; button.textContent = 'Send sign-in code';
+      if (sent) {
+        const optIn = document.querySelector('#notificationOptIn');
+        if (optIn) { optIn.innerHTML = notificationLoginMarkup(); bindNotificationOptIn(); }
+        renderPublicContent();
+      }
     };
+    bindEmailCodeControls(document.querySelector('#notificationOptIn') || document);
   }
 
   async function refreshNotificationOptIn() {
@@ -190,20 +269,23 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
 
   function eventLoginMarkup(subject) {
     if (getSession()) return `<div class="notice">No published ${esc(subject)} are currently available for your account.</div>`;
-    return `<div class="private-event-login"><span class="status purple">Attendee sign-in</span><h3>${esc(subject)}</h3><p>For privacy, this information is available only to signed-in attendees and authorised staff.</p><form class="event-login-form"><label>Email address</label><div class="inline-login"><input type="email" name="email" required placeholder="name@example.com"><button class="btn btn-primary" type="submit">Send sign-in link</button></div><div class="service-save-result"></div></form></div>`;
+    if (state.pendingLoginEmail) return `<div class="private-event-login"><span class="status purple">Attendee sign-in</span><h3>Enter your sign-in code</h3><p>We sent six digits to ${esc(state.pendingLoginEmail)}. Enter them to view ${esc(subject)}.</p>${emailCodeForm()}</div>`;
+    return `<div class="private-event-login"><span class="status purple">Attendee sign-in</span><h3>${esc(subject)}</h3><p>For privacy, this information is available only to signed-in attendees and authorised staff.</p><form class="event-login-form"><label>Email address</label><div class="inline-login"><input type="email" name="email" required placeholder="name@example.com"><button class="btn btn-primary" type="submit">Send sign-in code</button></div><div class="service-save-result"></div></form></div>`;
   }
 
   function bindEventLogin() {
     const form = document.querySelector('.event-login-form');
-    if (!form) return;
-    form.onsubmit = async event => {
+    if (form) form.onsubmit = async event => {
       event.preventDefault();
       const result = form.querySelector('.service-save-result');
-      const email = new FormData(form).get('email');
-      message(result, 'Sending secure sign-in link...', '');
-      const response = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/?next=event` } });
-      message(result, response.error ? response.error.message : 'Check your email for the secure sign-in link.', response.error ? 'error' : 'success');
+      const sent = await sendEmailCode(new FormData(form).get('email'), result);
+      if (sent) {
+        const optIn = document.querySelector('#notificationOptIn');
+        if (optIn) { optIn.innerHTML = notificationLoginMarkup(); bindNotificationOptIn(); }
+        renderPublicContent();
+      }
     };
+    bindEmailCodeControls(document.querySelector('#eventAppContent') || document);
   }
 
   function renderPublicContent() {
