@@ -7,6 +7,11 @@ const SUPABASE_KEY = 'sb_publishable_WoZaQe5QeUDLb764uMWEtw_78rsp8Mi';
 const EVENT_ID = '9c1c1d5e-d9f1-4f6b-b323-f3c35261fc19';
 const TRAVEL_DATE_START = '2027-01-27';
 const TRAVEL_DATE_END = '2027-02-09';
+const EVENT_DATE_START = '2027-01-30';
+const EVENT_DATE_END = '2027-02-06';
+const ATTENDEE_CATEGORIES = ['Winter Sports Ambassador','Military Guest','Sponsor','Sponsor Guest','Royal Party','Proton','Committee','Protocol','Hill Team','Other'];
+const SPONSOR_CATEGORIES = new Set(['Sponsor','Sponsor Guest']);
+const NON_COMPETING_CATEGORIES = new Set(['Winter Sports Ambassador','Sponsor','Sponsor Guest','Royal Party','Proton']);
 let supabase = null;
 let eventFeature = null;
 let roomAllocator = null;
@@ -18,7 +23,7 @@ const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_t
 const requestedAuthRoute = new URLSearchParams(location.search).get('next') === 'event' ? 'event' : 'staff';
 let authLanding = ['staff','event'].includes(new URLSearchParams(location.search).get('next')) || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? requestedAuthRoute : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', protocolSection:'accommodation', manualPersonOpen:false, operationalOverview:null, operationalOverviewError:null, intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeDeliveries:[], financeRates:[], financePackages:[], financeTravel:[], financeBillingSettings:null, invoiceEmailCapabilities:null, financeQuery:'', financeFilter:'all', financeRateQuery:'', financeRateGroup:'all', financeRateCardOpen:false, financeBillingSettingsOpen:false, selectedFinanceRateId:null, selectedFinanceAttendeeId:null, selectedInvoiceId:null };
+const state = { route: authLanding ? requestedAuthRoute : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', protocolSection:'accommodation', manualPersonOpen:false, registrationSponsors:[], registrationContextLoaded:false, registrationContextLoading:false, registrationInvitation:null, operationalOverview:null, operationalOverviewError:null, intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeDeliveries:[], financeRates:[], financePackages:[], financeTravel:[], financeBillingSettings:null, invoiceEmailCapabilities:null, financeQuery:'', financeFilter:'all', financeRateQuery:'', financeRateGroup:'all', financeRateCardOpen:false, financeBillingSettingsOpen:false, selectedFinanceRateId:null, selectedFinanceAttendeeId:null, selectedInvoiceId:null };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -52,7 +57,12 @@ ${[['📝','Simple registration','One mobile-friendly form replaces the legacy a
 <section class="section grid grid-2"><div class="card"><span class="status purple">Attendee</span><h2>Your event in your pocket</h2><p>Register, then use the same web app during the week for schedules, race locations, announcements and event information. It can be installed to a phone home screen like an app.</p><div class="actions"><button class="btn btn-ghost" data-route="event">View event app</button></div></div><div class="card"><span class="status green">Staff</span><h2>One operational picture</h2><p>Protocol, Sponsor and Finance roles each get the tools they need without exposing sensitive or financial data to ordinary attendees.</p><div class="actions"><button class="btn btn-ghost" data-route="staff">Staff sign in</button></div></div></section>`;
 }
 
-const opts=(arr,placeholder='Select…')=>`<option value="">${placeholder}</option>${arr.map(v=>`<option>${v}</option>`).join('')}`;
+function currentCategoryOptions(values){
+ const mapped=values.map(value=>value==='Military VIP'?'Winter Sports Ambassador':value);
+ if(values.includes('Military VIP')&&!mapped.includes('Proton'))mapped.splice(Math.max(mapped.length-1,0),0,'Proton');
+ return mapped;
+}
+const opts=(arr,placeholder='Select…')=>`<option value="">${placeholder}</option>${currentCategoryOptions(arr).map(v=>`<option>${v}</option>`).join('')}`;
 function register(){
 return `<div class="hero-mini"><span class="eyebrow">Attendance request</span><h2>ISSSC 2027 registration</h2><p>Your answers are a request. Protocol confirms accommodation, transfers, lift passes and chargeable services before billing.</p></div>
 <div class="surface"><div class="surface-head"><div><strong>Attendance details</strong><div class="muted small">30 January–6 February 2027 · Méribel</div></div><span class="status purple">Secure web form</span></div><div class="surface-body">
@@ -61,33 +71,33 @@ return `<div class="hero-mini"><span class="eyebrow">Attendance request</span><h
 <div class="field checkbox full"><input type="checkbox" id="onBehalf" name="submitted_on_behalf"><div><label for="onBehalf">I am completing this on behalf of someone else</label><small>We will keep the submitter and attendee details separate.</small></div></div>
 <div class="field proxy hidden"><label>Your name</label><input name="proxy_name"></div><div class="field proxy hidden"><label>Your email</label><input type="email" name="proxy_email"></div>
 <div class="form-section"><h3>Attendee</h3><p>Who is attending ISSSC 2027?</p></div>
-<div class="field"><label>Category *</label><select name="category" required>${opts(['Military VIP','Military Guest','Sponsor','Sponsor Guest','Royal Party','Committee','Protocol','Hill Team','Other'])}</select></div>
-<div class="field"><label>Sponsor / organisation</label><input name="sponsor_name" placeholder="If applicable"></div>
+<div class="field"><label>Category *</label><select name="category" required>${selectedOptions(ATTENDEE_CATEGORIES,state.registrationInvitation?.category||'')}</select></div>
+<div class="field hidden" id="sponsorOrganisationField"><label>Sponsor / organisation *</label><select name="sponsor_name" disabled>${registrationSponsorOptions(state.registrationInvitation?.sponsor_name||'')}</select><small>This list is managed by the Sponsor team in the staff site.</small></div>
 <div class="field"><label>Rank / title</label><input name="title_rank"></div><div class="field"><label>Role / appointment</label><input name="role"></div>
 <div class="field"><label>First name *</label><input name="first_name" required></div><div class="field"><label>Surname *</label><input name="surname" required></div>
 <div class="field"><label>Post nominals</label><input name="post_nominals"></div><div class="field"><label>Email *</label><input type="email" name="email" required></div>
 <div class="field"><label>Mobile</label><input name="mobile" inputmode="tel"></div><div class="field"><label>Service</label><select name="service">${opts(['Royal Navy','British Army','Royal Air Force','Civilian','Other'])}</select></div>
-<div class="field"><label>Discipline</label><select name="discipline">${opts(['Alpine','Snowboard','Telemark','Nordic','Bobsleigh','Skeleton','Luge','Other','Not competing'])}</select></div>
+<div class="field" id="disciplineField"><label>Discipline</label><select name="discipline">${opts(['Alpine','Snowboard','Telemark','Nordic','Bobsleigh','Skeleton','Luge','Other','Not competing'])}</select><small>Shown only for categories that may be competing.</small></div>
 <div class="form-section"><h3>Accommodation</h3><p>Hotel choice is a preference only. Protocol will record the assigned hotel and room separately.</p></div>
 <div class="field checkbox"><input type="checkbox" name="accommodation_required" id="acc"><label for="acc">I require accommodation</label></div>
-<div class="field"><label>Hotel preference</label><select name="hotel_preference">${opts(['Eterlou','Chaudanne','Savoy','Chalet','Own accommodation','No preference'])}</select></div>
-<div class="field"><label>Accommodation from</label><input type="date" min="2027-01-30" max="2027-02-06" name="accommodation_from"></div><div class="field"><label>Accommodation to</label><input type="date" min="2027-01-30" max="2027-02-06" name="accommodation_to"></div>
-<div class="field checkbox"><input type="checkbox" name="share_room" id="share"><label for="share">I am willing / expecting to share a room</label></div><div class="field"><label>Sharing with</label><input name="sharing_with"></div>
-<div class="field"><label>Evening meal preference</label><select name="dinners_required">${opts(['Dinner with event guests each night','B&B only / no event dinner','Not sure'])}</select></div><div class="field"><label>Dietary requirements</label><textarea name="dietary_requirements" placeholder="Only information needed to support your attendance"></textarea></div>
+<div class="field accommodation-detail"><label>Hotel preference</label><select name="hotel_preference"></select><small>Chalet is available only to the Proton category.</small></div>
+<div class="field accommodation-detail"><label>Accommodation from</label><select name="accommodation_from"></select><small id="sponsorDateNote" class="hidden">Sponsor arrivals are limited to Saturday 30 January or Wednesday 3 February.</small></div><div class="field accommodation-detail"><label>Accommodation to</label><select name="accommodation_to">${eventStayDateOptions()}</select></div>
+<div class="field checkbox accommodation-detail"><input type="checkbox" name="share_room" id="share"><label for="share">I am willing / expecting to share a room</label></div><div class="field accommodation-detail"><label>Sharing with</label><input name="sharing_with"></div>
+<div class="field" id="dinnerField"><label>Evening meal preference</label><select name="dinners_required">${opts(['Dinner with event guests each night','B&B only / no event dinner','Not sure'])}</select><small id="sponsorDinnerNote" class="hidden">Event dinners are included for sponsors and sponsor guests.</small></div><div class="field"><label>Dietary requirements</label><textarea name="dietary_requirements" placeholder="Only information needed to support your attendance"></textarea></div>
 <div class="form-section"><h3>Arrival</h3><p>Travel details help Protocol coordinate transfers.</p></div>
 <div class="field"><label>Method</label><select name="arrival_method">${opts(['Flight','Train','Drive','Coach','Other'])}</select></div><div class="field"><label>Airport / station</label><input name="arrival_airport_station"></div>
-<div class="field"><label>Flight / travel number</label><input name="arrival_number"></div>${dateTimeField('arrival_datetime','Arrival date and time','','')}
-${dateTimeField('arrival_resort_datetime','Expected in resort date and time','','')}<div class="field checkbox"><input type="checkbox" name="arrival_transfer" id="arrTransfer"><label for="arrTransfer">Request UKAFWSA arrival transfer</label></div>
-<div class="form-section"><h3>Departure</h3></div>
+<div class="field hidden" id="arrivalOtherField"><label>Other arrival method *</label><input name="arrival_method_other" disabled placeholder="Describe how you are travelling"></div><div class="field"><label>Flight / travel number</label><input name="arrival_number"></div>${dateTimeField('arrival_datetime','Scheduled arrival date and time','','')}
+<div class="field checkbox"><input type="checkbox" name="arrival_transfer" id="arrTransfer"><div><label for="arrTransfer">Request UKAFWSA arrival transfer</label><small>Protocol will confirm the transfer and Méribel arrival time separately.</small></div></div>
+<div class="form-section"><h3>Departure</h3><p>Enter the scheduled flight, train, coach or road departure. Protocol will confirm any resort pickup time.</p></div>
 <div class="field"><label>Method</label><select name="departure_method">${opts(['Flight','Train','Drive','Coach','Other'])}</select></div><div class="field"><label>Airport / station</label><input name="departure_airport_station"></div>
-<div class="field"><label>Flight / travel number</label><input name="departure_number"></div>${dateTimeField('departure_datetime','Departure date and time','','')}
-${dateTimeField('departure_resort_datetime','Leave resort date and time','','')}<div class="field checkbox"><input type="checkbox" name="departure_transfer" id="depTransfer"><label for="depTransfer">Request UKAFWSA departure transfer</label></div>
+<div class="field hidden" id="departureOtherField"><label>Other departure method *</label><input name="departure_method_other" disabled placeholder="Describe how you are travelling"></div><div class="field"><label>Flight / travel number</label><input name="departure_number"></div>${dateTimeField('departure_datetime','Scheduled departure date and time','','')}
+<div class="field checkbox"><input type="checkbox" name="departure_transfer" id="depTransfer"><div><label for="depTransfer">Request UKAFWSA departure transfer</label><small>Protocol will allocate the final transfer or coach option.</small></div></div>
 <div class="form-section"><h3>On snow</h3></div>
-<div class="field checkbox"><input type="checkbox" name="lift_pass_required" id="lift"><label for="lift">I require a 3 Vallées lift pass</label></div><div class="field checkbox"><input type="checkbox" checked name="carre_neige_required" id="carre"><label for="carre">Carre Neige requested</label></div>
-<div class="field"><label>First ski day</label><input type="date" min="2027-01-30" max="2027-02-06" name="first_ski_day"></div><div class="field"><label>Last ski day</label><input type="date" min="2027-01-30" max="2027-02-06" name="last_ski_day"></div>
+<div class="field checkbox"><input type="checkbox" name="lift_pass_required" id="lift"><label for="lift">I require a 3 Vallées lift pass</label></div><div class="notice hidden" id="carreIncluded"><strong>Carre Neige included.</strong> It is automatically added to every event lift pass.</div>
+<div class="field lift-detail hidden"><label>First ski day</label><input type="date" min="2027-01-30" max="2027-02-06" name="first_ski_day" disabled></div><div class="field lift-detail hidden"><label>Last ski day</label><input type="date" min="2027-01-30" max="2027-02-06" name="last_ski_day" disabled></div>
 <div class="field checkbox"><input type="checkbox" name="lessons_required" id="lessons"><label for="lessons">I would like lessons</label></div><div class="field"><label>Lesson type</label><select name="lesson_type">${opts(['Group','Private','Telemark','Not sure'])}</select></div>
-<div class="field"><label>Lesson dates / preference</label><input name="lesson_dates"></div><div class="field checkbox"><input type="checkbox" name="equipment_hire_required" id="hire"><label for="hire">I need equipment hire information</label></div>
-<div class="field"><label>Boot size</label><input name="boot_size"></div><div class="field"><label>Date of birth</label><input type="date" name="date_of_birth"><small>Collected only where needed for Carre Neige arrangements.</small></div>
+<div class="field"><label>Lesson dates / preference</label><input name="lesson_dates"></div><div class="field checkbox"><input type="checkbox" name="equipment_hire_required" id="hire"><div><label for="hire">I would like equipment-hire information</label><small>This does not reserve equipment. The event team will send you the relevant hire information.</small></div></div>
+<div class="field lift-detail hidden"><label>Date of birth</label><input type="date" name="date_of_birth" disabled><small>Needed to arrange Carre Neige with your lift pass.</small></div>
 <div class="field full"><label>Anything else Protocol should know?</label><textarea name="other_information"></textarea></div>
 <div class="field full"><div class="notice warn">Submitting this form does not create a final bill. Protocol confirms what was actually supplied; Finance calculates charges from the approved event rate card.</div></div>
 <div class="field checkbox full"><input type="checkbox" required name="privacy_acknowledged" id="privacyAcknowledged"><div><label for="privacyAcknowledged">I have read the <a href="/privacy.html" target="_blank" rel="noopener">privacy notice</a> *</label><small>Your information is used to administer attendance, accommodation, travel, lift passes, safety and billing for ISSSC 2027.</small></div></div>
@@ -101,9 +111,9 @@ return eventFeature ? eventFeature.publicMarkup() : `<div class="hero-mini"><spa
 
 function staffLogin(){
 if(pendingLoginEmail){
-return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Enter your sign-in code</h2><div class="muted">Staff portal</div></div></div><p class="muted">We sent a six-digit code to <strong>${esc(pendingLoginEmail)}</strong>. Enter it below; this avoids security scanners consuming one-use email links.</p><form id="otpForm" class="form-grid"><div class="field full"><label>Six-digit code</label><input name="token" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required placeholder="000000"></div><div class="field full"><button class="btn btn-primary" type="submit">Sign in</button></div><div id="loginResult" class="field full"></div></form><div class="actions"><button class="btn btn-ghost btn-small" id="resendLoginCode" type="button">Send a new code</button><button class="btn btn-ghost btn-small" id="changeLoginEmail" type="button">Use a different email</button></div></div>`;
+return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Enter your sign-in code</h2><div class="muted">Staff portal</div></div></div><p class="muted">We sent an eight-digit code to <strong>${esc(pendingLoginEmail)}</strong>. Enter it below; this avoids security scanners consuming one-use email links.</p><form id="otpForm" class="form-grid"><div class="field full"><label>Eight-digit code</label><input name="token" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{8}" minlength="8" maxlength="8" required placeholder="00000000"></div><div class="field full"><button class="btn btn-primary" type="submit">Sign in</button></div><div id="loginResult" class="field full"></div></form><div class="actions"><button class="btn btn-ghost btn-small" id="resendLoginCode" type="button">Send a new code</button><button class="btn btn-ghost btn-small" id="changeLoginEmail" type="button">Use a different email</button></div></div>`;
 }
-return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Staff portal</h2><div class="muted">Protocol · Notifications · Sponsor · Finance · Content</div></div></div><p class="muted">Enter your authorised email address and we will send you a secure six-digit sign-in code.</p><form id="loginForm" class="form-grid"><div class="field full"><label>Email</label><input name="email" type="email" autocomplete="email" required placeholder="name@example.com"></div><div class="field full"><button class="btn btn-primary" type="submit">Send sign-in code</button></div><div id="loginResult" class="field full"></div></form></div>`;
+return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Staff portal</h2><div class="muted">Protocol · Notifications · Sponsor · Finance · Content</div></div></div><p class="muted">Enter your authorised email address and we will send you a secure eight-digit sign-in code.</p><form id="loginForm" class="form-grid"><div class="field full"><label>Email</label><input name="email" type="email" autocomplete="email" required placeholder="name@example.com"></div><div class="field full"><button class="btn btn-primary" type="submit">Send sign-in code</button></div><div id="loginResult" class="field full"></div></form></div>`;
 }
 function staffDashboard(){
 const role=state.profile?.app_role || 'authenticated';
@@ -144,14 +154,15 @@ function staff(){
 function render(){
   const content = state.route==='register'?register():state.route==='event'?eventApp():state.route==='staff'?staff():home();
   app.innerHTML=layout(content);bind();
+  if(state.route==='register')loadRegistrationContext();
   if(state.route==='staff' && state.session && state.profile && state.profile.active!==false && state.profile.app_role!=='attendee') loadStaffData();
   if(state.route==='event' && eventFeature) eventFeature.loadPublic();
 }
 function bind(){
   document.querySelectorAll('[data-route]').forEach(b=>b.addEventListener('click',()=>setRoute(b.dataset.route)));
   const menu=document.querySelector('#menuBtn'),nav=document.querySelector('#nav');if(menu) menu.onclick=()=>nav.classList.toggle('open');
-  const ob=document.querySelector('#onBehalf');if(ob) ob.onchange=()=>document.querySelectorAll('.proxy').forEach(x=>x.classList.toggle('hidden',!ob.checked));
-  const reg=document.querySelector('#registrationForm');if(reg) reg.addEventListener('submit',submitRegistration);
+  const ob=document.querySelector('#onBehalf');if(ob) ob.onchange=()=>{document.querySelectorAll('.proxy').forEach(x=>x.classList.toggle('hidden',!ob.checked));applyRegistrationRules();};
+  const reg=document.querySelector('#registrationForm');if(reg){reg.addEventListener('submit',submitRegistration);reg.addEventListener('invalid',registrationInvalid,true);reg.elements.category.onchange=applyRegistrationRules;reg.elements.accommodation_required.onchange=applyRegistrationRules;reg.elements.arrival_method.onchange=applyRegistrationRules;reg.elements.departure_method.onchange=applyRegistrationRules;reg.elements.lift_pass_required.onchange=applyRegistrationRules;applyRegistrationRules();}
   const login=document.querySelector('#loginForm');if(login) login.addEventListener('submit',sendLoginLink);
   const otp=document.querySelector('#otpForm');if(otp)otp.addEventListener('submit',verifyLoginCode);
   const resend=document.querySelector('#resendLoginCode');if(resend)resend.onclick=resendLoginCode;
@@ -191,18 +202,89 @@ function formObject(form){
  form.querySelectorAll('input[type=checkbox]').forEach(c=>obj[c.name]=c.checked);
  return obj;
 }
+function eventStayDateOptions(sponsorOnly=false,current=''){
+ const dates=sponsorOnly?['2027-01-30','2027-02-03']:dateRange(EVENT_DATE_START,EVENT_DATE_END);
+ return `<option value="">Select date…</option>${dates.map(date=>`<option value="${date}" ${date===current?'selected':''}>${esc(displayEventDate(date))}</option>`).join('')}`;
+}
+function registrationSponsorOptions(current=''){
+ if(!state.registrationContextLoaded)return '<option value="">Loading sponsor list…</option>';
+ const items=[...state.registrationSponsors];
+ if(current&&!items.some(item=>item.sponsor_name===current))items.unshift({sponsor_name:current});
+ return `<option value="">${items.length?'Select sponsor…':'No confirmed sponsors available'}</option>${items.map(item=>`<option value="${esc(item.sponsor_name)}" ${item.sponsor_name===current?'selected':''}>${esc(item.sponsor_name)}</option>`).join('')}`;
+}
+async function loadRegistrationContext(){
+ if(!supabase||state.registrationContextLoaded||state.registrationContextLoading)return;
+ state.registrationContextLoading=true;
+ const invite=new URLSearchParams(location.search).get('invite');
+ const [sponsors,invitation]=await Promise.all([
+  supabase.rpc('get_registration_sponsors_v2',{p_event_id:EVENT_ID}),
+  invite?supabase.rpc('get_registration_invitation_v2',{p_event_id:EVENT_ID,p_invitation_code:invite}):Promise.resolve({data:[],error:null})
+ ]);
+ state.registrationSponsors=sponsors.error?[]:(sponsors.data||[]);
+ state.registrationInvitation=invitation.error?null:(invitation.data?.[0]||null);
+ state.registrationContextLoaded=true;state.registrationContextLoading=false;
+ const form=document.querySelector('#registrationForm');if(!form)return;
+ const sponsor=form.elements.sponsor_name,current=state.registrationInvitation?.sponsor_name||sponsor.value;
+ sponsor.innerHTML=registrationSponsorOptions(current);sponsor.value=current||'';
+ if(state.registrationInvitation){
+  form.elements.category.value=state.registrationInvitation.category==='Military VIP'?'Winter Sports Ambassador':(state.registrationInvitation.category||'Sponsor Guest');
+  if(!form.elements.email.value)form.elements.email.value=state.registrationInvitation.invitee_email||'';
+ }
+ applyRegistrationRules();
+}
+function applyRegistrationRules(){
+ const form=document.querySelector('#registrationForm');if(!form)return;
+ const category=form.elements.category.value,isSponsor=SPONSOR_CATEGORIES.has(category),nonCompeting=NON_COMPETING_CATEGORIES.has(category),needsRoom=form.elements.accommodation_required.checked;
+ form.elements.category.disabled=!!state.registrationInvitation;form.elements.email.readOnly=!!state.registrationInvitation;
+ const discipline=document.querySelector('#disciplineField');discipline.classList.toggle('hidden',nonCompeting);form.elements.discipline.disabled=nonCompeting;if(nonCompeting)form.elements.discipline.value='';
+ const sponsorField=document.querySelector('#sponsorOrganisationField');sponsorField.classList.toggle('hidden',!isSponsor);form.elements.sponsor_name.disabled=!isSponsor||!state.registrationContextLoaded||!!state.registrationInvitation;form.elements.sponsor_name.required=isSponsor&&!state.registrationInvitation;
+ if(!isSponsor&&!state.registrationInvitation)form.elements.sponsor_name.value='';
+ const hotel=form.elements.hotel_preference,hotelCurrent=hotel.value,hotels=category==='Proton'?['Eterlou','Chaudanne','Savoy','Chalet','Own accommodation','No preference']:['Eterlou','Chaudanne','Savoy','Own accommodation','No preference'];
+ hotel.innerHTML=opts(hotels);if(hotels.includes(hotelCurrent))hotel.value=hotelCurrent;
+ document.querySelectorAll('.accommodation-detail').forEach(field=>field.classList.toggle('hidden',!needsRoom));
+ document.querySelectorAll('.accommodation-detail input,.accommodation-detail select').forEach(control=>control.disabled=!needsRoom);
+ const from=form.elements.accommodation_from,fromCurrent=from.value;from.innerHTML=eventStayDateOptions(isSponsor,fromCurrent);if([...from.options].some(option=>option.value===fromCurrent))from.value=fromCurrent;
+ document.querySelector('#sponsorDateNote').classList.toggle('hidden',!isSponsor);
+ const dinner=form.elements.dinners_required;document.querySelector('#sponsorDinnerNote').classList.toggle('hidden',!isSponsor);dinner.disabled=isSponsor;if(isSponsor)dinner.value='Dinner with event guests each night';
+ [['arrival_method','arrival_method_other','arrivalOtherField'],['departure_method','departure_method_other','departureOtherField']].forEach(([methodName,otherName,fieldId])=>{const other=form.elements[methodName].value==='Other',field=document.querySelector(`#${fieldId}`),input=form.elements[otherName];field.classList.toggle('hidden',!other);input.disabled=!other;input.required=other;if(!other)input.value='';});
+ const lift=form.elements.lift_pass_required.checked;document.querySelector('#carreIncluded').classList.toggle('hidden',!lift);document.querySelectorAll('.lift-detail').forEach(field=>field.classList.toggle('hidden',!lift));document.querySelectorAll('.lift-detail input').forEach(input=>input.disabled=!lift);
+ const proxy=form.elements.submitted_on_behalf.checked;form.elements.proxy_name.required=proxy;form.elements.proxy_email.required=proxy;
+}
+function registrationInvalid(event){
+ const result=document.querySelector('#formResult');if(!result)return;
+ const label=event.target.closest('.field')?.querySelector('label')?.textContent?.replace('*','').trim()||'highlighted field';
+ result.innerHTML=`<div class="notice error">Please complete ${esc(label.toLowerCase())}. ${esc(event.target.validationMessage||'')}</div>`;
+}
+function registrationError(message,field){
+ const result=document.querySelector('#formResult');result.innerHTML=`<div class="notice error">${esc(message)}</div>`;
+ if(field){field.focus();field.scrollIntoView({behavior:'smooth',block:'center'});}return false;
+}
+function validateRegistration(form,body){
+ if(body.accommodation_required){
+  if(!body.accommodation_from)return registrationError('Choose the date accommodation is required from.',form.elements.accommodation_from);
+  if(!body.accommodation_to)return registrationError('Choose the date accommodation is required to.',form.elements.accommodation_to);
+  if(body.accommodation_to<=body.accommodation_from)return registrationError('Accommodation end date must be after the start date.',form.elements.accommodation_to);
+  if(SPONSOR_CATEGORIES.has(body.category)&&!['2027-01-30','2027-02-03'].includes(body.accommodation_from))return registrationError('Sponsors can start accommodation only on Saturday 30 January or Wednesday 3 February.',form.elements.accommodation_from);
+ }
+ if(body.lift_pass_required&&body.first_ski_day&&body.last_ski_day<body.first_ski_day)return registrationError('Last ski day must be on or after the first ski day.',form.elements.last_ski_day);
+ return true;
+}
 async function submitRegistration(e){
  e.preventDefault();const form=e.currentTarget;const btn=document.querySelector('#submitRegistration');const result=document.querySelector('#formResult');
  if(!supabase){result.innerHTML='<div class="notice error">The secure registration service is still connecting. Please wait a moment and try again.</div>';return}
- const body=formObject(form);if(body.website){form.reset();result.innerHTML='<div class="notice success">Thank you.</div>';return}
- const registrationDateTimes=[['arrival_datetime','arrival'],['arrival_resort_datetime','expected resort arrival'],['departure_datetime','departure'],['departure_resort_datetime','resort departure']];
+ const body=formObject(form);if(state.registrationInvitation){body.category=state.registrationInvitation.category==='Military VIP'?'Winter Sports Ambassador':state.registrationInvitation.category;body.sponsor_name=state.registrationInvitation.sponsor_name;}if(body.website){form.reset();result.innerHTML='<div class="notice success">Thank you.</div>';return}
+ if(!validateRegistration(form,body))return;
+ const registrationDateTimes=[['arrival_datetime','scheduled arrival'],['departure_datetime','scheduled departure']];
  const incomplete=registrationDateTimes.find(([name])=>incompleteDateTime(body,name));
  if(incomplete){result.innerHTML=`<div class="notice error">Choose both a date and time for the ${incomplete[1]}.</div>`;return;}
  registrationDateTimes.forEach(([name])=>{body[name]=joinedDateTime(body,name);delete body[`${name}_date`];delete body[`${name}_time`];});
+ body.arrival_resort_datetime=null;body.departure_resort_datetime=null;body.carre_neige_required=!!body.lift_pass_required;body.boot_size=null;
+ if(NON_COMPETING_CATEGORIES.has(body.category))body.discipline=null;
+ if(SPONSOR_CATEGORIES.has(body.category))body.dinners_required='Dinner with event guests each night';
+ if(!body.accommodation_required){body.hotel_preference=null;body.accommodation_from=null;body.accommodation_to=null;body.share_room=false;body.sharing_with=null;}
  btn.disabled=true;btn.textContent='Submitting…';result.innerHTML='';
- const row={event_id:EVENT_ID,source:'web',invitation_code:new URLSearchParams(location.search).get('invite'),submitted_on_behalf:!!body.submitted_on_behalf,submitter_name:body.submitted_on_behalf?body.proxy_name:`${body.first_name} ${body.surname}`,submitter_email:body.submitted_on_behalf?body.proxy_email:body.email,attendee_email:body.email,processing_status:'pending',mapping_version:'web_v1',raw_payload:body};
- const {error}=await supabase.from('intake_submissions').insert(row);
- if(error){console.error(error);result.innerHTML='<div class="notice error">We could not save your registration. Please try again or contact the Protocol team.</div>';btn.disabled=false;btn.textContent='Submit attendance request';return}
+ const {error}=await supabase.rpc('submit_registration_v2',{p_event_id:EVENT_ID,p_invitation_code:new URLSearchParams(location.search).get('invite'),p_submitted_on_behalf:!!body.submitted_on_behalf,p_submitter_name:body.submitted_on_behalf?body.proxy_name:`${body.first_name} ${body.surname}`,p_submitter_email:body.submitted_on_behalf?body.proxy_email:body.email,p_attendee_email:body.email,p_payload:body});
+ if(error){console.error(error);result.innerHTML=`<div class="notice error">${esc(error.message||'We could not save your registration. Please try again or contact the Protocol team.')}</div>`;btn.disabled=false;btn.textContent='Submit attendance request';return}
  form.reset();result.innerHTML='<div class="notice success"><strong>Registration received.</strong> Protocol will review your request and confirm the operational details separately.</div>';btn.textContent='Submitted';toast('Attendance request received');
 }
 async function sendLoginLink(e){
@@ -211,7 +293,7 @@ async function sendLoginLink(e){
  const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:`${location.origin}/?next=staff`,shouldCreateUser:true}});
  if(error){box.innerHTML=`<div class="notice error">${esc(error.message)}</div>`;return}
  pendingLoginEmail=email;sessionStorage.setItem('isssc-staff-login-email',email);render();
- const result=document.querySelector('#loginResult');if(result)result.innerHTML='<div class="notice success">Code sent. Check your email and enter the six digits above.</div>';
+ const result=document.querySelector('#loginResult');if(result)result.innerHTML='<div class="notice success">Code sent. Check your email and enter the eight digits above.</div>';
 }
 async function verifyLoginCode(e){
  e.preventDefault();const form=e.currentTarget,token=String(new FormData(form).get('token')||'').replace(/\s/g,'');const box=document.querySelector('#loginResult'),button=form.querySelector('[type="submit"]');
@@ -374,9 +456,9 @@ function openIntake(id){
  el.innerHTML=`<section class="review-panel"><div class="review-heading"><div><span class="status ${statusClass(row.processing_status)}">${esc(statusLabel(row.processing_status))}</span><h3>${esc(`${p.title_rank||''} ${p.first_name||''} ${p.surname||''}`.trim()||'Registration')}</h3><p>${esc(row.attendee_email||'')}</p></div><button class="btn btn-ghost btn-small" id="closeIntake">Close</button></div>
  <div class="review-sections"><section><h4>Attendee</h4>${detailRows([['Category',p.category],['Organisation',p.sponsor_name],['Role / appointment',p.role],['Service',p.service],['Discipline',p.discipline],['Mobile',p.mobile],['Post nominals',p.post_nominals]])}</section>
  <section><h4>Accommodation</h4>${detailRows([['Required',p.accommodation_required],['Hotel preference',p.hotel_preference],['From',p.accommodation_from],['To',p.accommodation_to],['Room share',p.share_room],['Sharing with',p.sharing_with],['Evening meals',p.dinners_required],['Dietary requirements',p.dietary_requirements]])}</section>
- <section><h4>Arrival</h4>${detailRows([['Method',p.arrival_method],['Airport / station',p.arrival_airport_station],['Travel number',p.arrival_number],['Date and time',p.arrival_datetime],['Expected in resort',p.arrival_resort_datetime],['Transfer requested',p.arrival_transfer]])}</section>
- <section><h4>Departure</h4>${detailRows([['Method',p.departure_method],['Airport / station',p.departure_airport_station],['Travel number',p.departure_number],['Date and time',p.departure_datetime],['Leave resort',p.departure_resort_datetime],['Transfer requested',p.departure_transfer]])}</section>
- <section><h4>On snow</h4>${detailRows([['Lift pass',p.lift_pass_required],['Carre Neige',p.carre_neige_required],['First ski day',p.first_ski_day],['Last ski day',p.last_ski_day],['Lessons',p.lessons_required],['Lesson type',p.lesson_type],['Lesson dates',p.lesson_dates],['Equipment hire',p.equipment_hire_required],['Boot size',p.boot_size],['Date of birth',p.date_of_birth]])}</section>
+ <section><h4>Arrival</h4>${detailRows([['Method',p.arrival_method],['Other method',p.arrival_method_other],['Airport / station',p.arrival_airport_station],['Travel number',p.arrival_number],['Scheduled date and time',p.arrival_datetime],['Transfer requested',p.arrival_transfer]])}</section>
+ <section><h4>Departure</h4>${detailRows([['Method',p.departure_method],['Other method',p.departure_method_other],['Airport / station',p.departure_airport_station],['Travel number',p.departure_number],['Scheduled date and time',p.departure_datetime],['Transfer requested',p.departure_transfer]])}</section>
+ <section><h4>On snow</h4>${detailRows([['Lift pass',p.lift_pass_required],['Carre Neige included',p.carre_neige_required],['First ski day',p.first_ski_day],['Last ski day',p.last_ski_day],['Lessons',p.lessons_required],['Lesson type',p.lesson_type],['Lesson dates',p.lesson_dates],['Equipment-hire information',p.equipment_hire_required],['Date of birth',p.date_of_birth]])}</section>
  <section><h4>Submission</h4>${detailRows([['Submitted',new Date(row.submitted_at).toLocaleString('en-GB')],['On behalf of attendee',row.submitted_on_behalf],['Submitted by',row.submitter_name],['Submitter email',row.submitter_email],['Other information',p.other_information],['Review notes',row.review_notes]])}</section></div>${actions}</section>`;
  document.querySelector('#closeIntake').onclick=()=>{el.innerHTML='';};
  document.querySelectorAll('[data-intake-decision]').forEach(button=>button.onclick=()=>reviewIntake(row,button.dataset.intakeDecision));
@@ -421,6 +503,7 @@ async function saveManualPerson(event){
  toast('Person created and ready for allocation');state.manualPersonOpen=false;state.protocolSection='attendees';render();await loadProtocol();await openProtocolAttendee(data);
 }
 function selectedOptions(values,current,placeholder='Select…'){
+ values=currentCategoryOptions(values);if(current==='Military VIP')current='Winter Sports Ambassador';
  const items=current&&!values.includes(current)?[current,...values]:values;
  return `<option value="">${placeholder}</option>${items.map(value=>`<option value="${esc(value)}" ${value===current?'selected':''}>${esc(value)}</option>`).join('')}`;
 }
@@ -508,7 +591,7 @@ function eventDateOptions(current){
 }
 function dateTimeField(name,label,value,disabled){
  const local=dateTimeLocalValue(value),date=local.slice(0,10),time=local.slice(11,16);
- return `<div class="field"><label>${label}</label><div class="date-time-pair"><select name="${name}_date" aria-label="${label} date"${disabled}>${eventDateOptions(date)}</select><input type="time" step="300" name="${name}_time" aria-label="${label} time" value="${esc(time)}"${disabled}></div><small>27 Jan–9 Feb 2027</small></div>`;
+ return `<div class="field"><label>${label}</label><div class="date-time-pair"><select name="${name}_date" aria-label="${label} date"${disabled}>${eventDateOptions(date)}</select><input type="time" step="60" name="${name}_time" aria-label="${label} time" value="${esc(time)}"${disabled}></div><small>Any minute between 27 Jan and 9 Feb 2027 is accepted.</small></div>`;
 }
 function joinedDateTime(body,name){
  const date=body[`${name}_date`]||'',time=body[`${name}_time`]||'';
@@ -568,10 +651,10 @@ function travelForm(direction,record,request){
 }
 function liftForm(lift,request){
  const editable=canEditProtocol(),disabled=editable?'':' disabled';
- const required=lift?lift.required:!!request.lift_pass_required,carre=lift?lift.carre_neige_required:(request.carre_neige_required!==false);
+ const required=lift?lift.required:!!request.lift_pass_required,carre=required;
  const start=lift?(lift.start_date||''):(request.first_ski_day||''),end=lift?(lift.end_date||''):(request.last_ski_day||'');
  return `<form class="service-form lift-form" data-lift-id="${lift?.id||''}"><div class="service-form-head"><div><span class="status ${lift?.protocol_confirmed?'green':'amber'}">${lift?.protocol_confirmed?'Confirmed':'Draft'}</span><strong>Lift pass</strong></div>${lift?`<small>${lift.pass_days??0} days · ${money(lift.total_charge)}</small>`:'<small>Not yet configured</small>'}</div>
- <div class="form-grid compact-grid"><div class="field checkbox"><input type="checkbox" name="required" ${required?'checked':''}${disabled}><label>Lift pass required</label></div><div class="field checkbox"><input type="checkbox" name="carre_neige_required" ${carre?'checked':''}${disabled}><label>Carre Neige required</label></div>
+ <div class="form-grid compact-grid"><div class="field checkbox"><input type="checkbox" name="required" ${required?'checked':''}${disabled}><label>Lift pass required</label></div><div class="field checkbox"><input type="checkbox" name="carre_neige_required" ${carre?'checked':''} disabled><div><label>Carre Neige included</label><small>Automatically included whenever a lift pass is required.</small></div></div>
  <div class="field"><label>First ski day</label><input type="date" name="start_date" value="${esc(start)}" min="2027-01-30" max="2027-02-06"${disabled}></div><div class="field"><label>Last ski day</label><input type="date" name="end_date" value="${esc(end)}" min="2027-01-30" max="2027-02-06"${disabled}></div>
  <div class="field checkbox"><input type="checkbox" name="chargeable" ${(lift?lift.chargeable:true)?'checked':''}${disabled}><label>Chargeable</label></div><div class="field"><label>Lift-pass rate (automatic if blank)</label><select name="rate_code"${disabled}>${rateOptions('lift_pass',null,null,lift?.rate_code||'')}</select></div>
  <div class="field checkbox full"><input type="checkbox" name="protocol_confirmed" ${lift?.protocol_confirmed?'checked':''}${disabled}><label>Protocol confirmed</label></div><div class="field full"><label>Lift-pass notes</label><textarea name="notes"${disabled}>${esc(lift?.notes||'')}</textarea></div></div>
@@ -584,7 +667,7 @@ function renderProtocolServices(request,stays,travel,lift,errors,attendee){
  el.className='ops-stack';el.innerHTML=`<div class="requested-summary"><strong>${attendee.record_source==='protocol_manual'&&Object.keys(request).length===0?'Protocol-created person':'Original request'}</strong>${attendee.record_source==='protocol_manual'&&Object.keys(request).length===0?'<p class="muted small">No registration form is linked. Protocol can still confirm accommodation, travel and a lift pass below.</p>':detailRows([['Accommodation',request.accommodation_required],['Hotel preference',request.hotel_preference],['Requested stay',request.accommodation_from&&request.accommodation_to?`${request.accommodation_from} to ${request.accommodation_to}`:null],['Room share',request.share_room],['Sharing with',request.sharing_with],['Lift pass',request.lift_pass_required]])}</div>
  <section class="service-group"><div class="service-group-head"><div><h4>Accommodation</h4><p>Each period is separately assigned and rated.</p></div>${canEditProtocol()?'<button class="btn btn-ghost btn-small" id="addStayPeriod">Add period</button>':''}</div><div id="stayForms" class="service-form-list">${(stays.length?stays:[null]).map(stay=>stayForm(stay,request,attendee.id)).join('')}</div></section>
  <section class="service-group"><div class="service-group-head"><div><h4>Travel and transfers</h4><p>Times are entered in local Méribel/Geneva time.</p></div></div><div class="travel-grid">${travelForm('arrival',arrival,request)}${travelForm('departure',departure,request)}</div></section>
- <section class="service-group"><div class="service-group-head"><div><h4>Lift pass</h4><p>The selected event rate is calculated from confirmed dates and Carre Neige selection.</p></div></div>${liftForm(lift,request)}</section>`;
+ <section class="service-group"><div class="service-group-head"><div><h4>Lift pass</h4><p>The selected event rate is calculated from confirmed dates; Carre Neige is always included.</p></div></div>${liftForm(lift,request)}</section>`;
  if(canEditProtocol())bindProtocolServiceForms(attendee.id,request);
 }
 function bindProtocolServiceForms(attendeeId,request){
@@ -595,7 +678,7 @@ function bindProtocolServiceForms(attendeeId,request){
   room.onchange=()=>{rate.innerHTML=rateOptions('accommodation',location.value,room.value,'');};
  });
  document.querySelectorAll('.travel-form').forEach(form=>form.onsubmit=event=>saveProtocolTravel(event,attendeeId));
- const lift=document.querySelector('.lift-form');if(lift){lift.onsubmit=event=>saveProtocolLift(event,attendeeId);lift.elements.carre_neige_required.onchange=()=>{lift.elements.rate_code.value='';};}
+ const lift=document.querySelector('.lift-form');if(lift){lift.onsubmit=event=>saveProtocolLift(event,attendeeId);lift.elements.required.onchange=()=>{lift.elements.carre_neige_required.checked=lift.elements.required.checked;lift.elements.rate_code.value='';};}
  const add=document.querySelector('#addStayPeriod');if(add)add.onclick=()=>{document.querySelector('#stayForms').insertAdjacentHTML('beforeend',stayForm(null,{},attendeeId));bindProtocolServiceForms(attendeeId,request);};
 }
 async function serviceSave(form,rpc,params,message,attendeeId){
@@ -618,7 +701,7 @@ function saveProtocolTravel(event,attendeeId){
 }
 function saveProtocolLift(event,attendeeId){
  event.preventDefault();const form=event.currentTarget,body=formObject(form);
- return serviceSave(form,'save_protocol_lift_pass',{p_attendee_id:attendeeId,p_lift_pass_id:form.dataset.liftId||null,p_required:!!body.required,p_start_date:body.start_date||null,p_end_date:body.end_date||null,p_carre_neige_required:!!body.carre_neige_required,p_chargeable:!!body.chargeable,p_rate_code:body.rate_code||null,p_protocol_confirmed:!!body.protocol_confirmed,p_notes:body.notes||null},'Lift pass saved',attendeeId);
+ return serviceSave(form,'save_protocol_lift_pass',{p_attendee_id:attendeeId,p_lift_pass_id:form.dataset.liftId||null,p_required:!!body.required,p_start_date:body.start_date||null,p_end_date:body.end_date||null,p_carre_neige_required:!!body.required,p_chargeable:!!body.chargeable,p_rate_code:body.rate_code||null,p_protocol_confirmed:!!body.protocol_confirmed,p_notes:body.notes||null},'Lift pass saved',attendeeId);
 }
 
 async function saveAttendeeCore(event,id){
