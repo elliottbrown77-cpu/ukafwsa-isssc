@@ -17,7 +17,7 @@ const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_t
 const requestedAuthRoute = new URLSearchParams(location.search).get('next') === 'event' ? 'event' : 'staff';
 let authLanding = ['staff','event'].includes(new URLSearchParams(location.search).get('next')) || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? requestedAuthRoute : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', protocolSection:'accommodation', manualPersonOpen:false, intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeDeliveries:[], financeRates:[], financePackages:[], financeTravel:[], financeBillingSettings:null, invoiceEmailCapabilities:null, financeQuery:'', financeFilter:'all', financeRateQuery:'', financeRateGroup:'all', financeRateCardOpen:false, financeBillingSettingsOpen:false, selectedFinanceRateId:null, selectedFinanceAttendeeId:null, selectedInvoiceId:null };
+const state = { route: authLanding ? requestedAuthRoute : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', protocolSection:'accommodation', manualPersonOpen:false, operationalOverview:null, operationalOverviewError:null, intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeDeliveries:[], financeRates:[], financePackages:[], financeTravel:[], financeBillingSettings:null, invoiceEmailCapabilities:null, financeQuery:'', financeFilter:'all', financeRateQuery:'', financeRateGroup:'all', financeRateCardOpen:false, financeBillingSettingsOpen:false, selectedFinanceRateId:null, selectedFinanceAttendeeId:null, selectedInvoiceId:null };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -39,7 +39,7 @@ function layout(content){
     <nav class="nav" id="nav">${navItems.map(([r,l])=>`<button data-route="${r}" class="${state.route===r?'active':''}">${l}</button>`).join('')}</nav>
   </div></header>
   <main class="main">${content}</main>
-  <footer class="footer"><div class="footer-inner"><span>UK Armed Forces Winter Sports Association</span><span>ISSSC 2027 · Méribel · 30 Jan–6 Feb 2027</span></div></footer>
+  <footer class="footer"><div class="footer-inner"><span>UK Armed Forces Winter Sports Association</span><span><a href="/privacy.html">Privacy</a> · ISSSC 2027 · Méribel · 30 Jan–6 Feb 2027</span></div></footer>
   </div>`;
 }
 
@@ -89,6 +89,7 @@ ${dateTimeField('departure_resort_datetime','Leave resort date and time','','')}
 <div class="field"><label>Boot size</label><input name="boot_size"></div><div class="field"><label>Date of birth</label><input type="date" name="date_of_birth"><small>Collected only where needed for Carre Neige arrangements.</small></div>
 <div class="field full"><label>Anything else Protocol should know?</label><textarea name="other_information"></textarea></div>
 <div class="field full"><div class="notice warn">Submitting this form does not create a final bill. Protocol confirms what was actually supplied; Finance calculates charges from the approved event rate card.</div></div>
+<div class="field checkbox full"><input type="checkbox" required name="privacy_acknowledged" id="privacyAcknowledged"><div><label for="privacyAcknowledged">I have read the <a href="/privacy.html" target="_blank" rel="noopener">privacy notice</a> *</label><small>Your information is used to administer attendance, accommodation, travel, lift passes, safety and billing for ISSSC 2027.</small></div></div>
 <div class="field full"><button class="btn btn-primary" type="submit" id="submitRegistration">Submit attendance request</button><div id="formResult"></div></div>
 </form></div></div>`;
 }
@@ -115,7 +116,7 @@ function protocolWorkspace(){
  return `<div class="protocol-workspace-toolbar"><nav class="protocol-workspace-nav" aria-label="Protocol work areas">${tabs.map(([key,label])=>`<button data-protocol-section="${key}" class="${state.protocolSection===key?'active':''}">${label}</button>`).join('')}</nav>${canEditProtocol()?'<button class="btn btn-primary" id="addProtocolPerson" type="button">Add person</button>':''}</div>${state.manualPersonOpen?manualPersonMarkup():''}${content}`;
 }
 function staffPanel(){
-if(state.staffTab==='overview') return `<div class="grid grid-4"><div class="card metric"><strong id="mPending">—</strong><span>Pending registrations</span></div><div class="card metric"><strong id="mAttendees">—</strong><span>Attendees</span></div><div class="card metric"><strong id="mSponsors">—</strong><span>Event sponsors</span></div><div class="card metric"><strong id="mInvoices">—</strong><span>Invoices</span></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Workflow</strong></div><div class="surface-body grid grid-3"><div class="card"><span class="status purple">1</span><h3>Review intake</h3><p>Public form submissions remain requests until Protocol accepts them.</p></div><div class="card"><span class="status purple">2</span><h3>Confirm services</h3><p>Assigned hotel, room, travel, passes and extras become the billable truth.</p></div><div class="card"><span class="status purple">3</span><h3>Issue invoice</h3><p>Finance reviews approved rates and snapshots immutable invoice lines.</p></div></div></div></section>`;
+if(state.staffTab==='overview') return operationalOverviewMarkup();
 if(state.staffTab==='intake') return `<div class="surface"><div class="surface-head"><div><strong>Registration review</strong><div class="muted small">Open a request to review every submitted detail before making a decision.</div></div><div class="intake-tools"><label class="small muted" for="intakeFilter">Show</label><select id="intakeFilter"><option value="pending">Pending</option><option value="review_required">Needs follow-up</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="all">All</option></select><button class="btn btn-ghost" id="refreshIntake">Refresh</button></div></div><div class="surface-body"><div id="intakeTable" class="empty">Loading registrations…</div><div id="intakeDetail"></div></div></div>`;
 if(state.staffTab==='protocol') return protocolWorkspace();
 if(state.staffTab==='notifications') return eventFeature ? eventFeature.notificationMarkup() : '<div class="surface"><div class="surface-body empty">Loading notification tools...</div></div>';
@@ -149,12 +150,14 @@ function bind(){
   const reg=document.querySelector('#registrationForm');if(reg) reg.addEventListener('submit',submitRegistration);
   const login=document.querySelector('#loginForm');if(login) login.addEventListener('submit',sendLoginLink);
   document.querySelectorAll('[data-stafftab]').forEach(b=>b.onclick=()=>{state.staffTab=b.dataset.stafftab;render()});
+  document.querySelectorAll('[data-overview-target]').forEach(b=>b.onclick=()=>openOverviewTarget(b));
   document.querySelectorAll('[data-protocol-section]').forEach(b=>b.onclick=()=>{state.protocolSection=b.dataset.protocolSection;state.manualPersonOpen=false;render()});
   const addProtocolPerson=document.querySelector('#addProtocolPerson');if(addProtocolPerson)addProtocolPerson.onclick=openManualPerson;
   const closeProtocolPerson=document.querySelector('#closeManualPerson');if(closeProtocolPerson)closeProtocolPerson.onclick=()=>{state.manualPersonOpen=false;render()};
   const manualPersonForm=document.querySelector('#manualPersonForm');if(manualPersonForm)manualPersonForm.onsubmit=saveManualPerson;
-  const out=document.querySelector('#signOutBtn');if(out) out.onclick=async()=>{await supabase.auth.signOut();state.session=null;state.profile=null;render();};
+  const out=document.querySelector('#signOutBtn');if(out) out.onclick=async()=>{await supabase.auth.signOut();state.session=null;state.profile=null;state.operationalOverview=null;state.invoiceEmailCapabilities=null;render();};
   const ref=document.querySelector('#refreshIntake');if(ref) ref.onclick=loadIntake;
+  const refreshOverview=document.querySelector('#refreshOverview');if(refreshOverview)refreshOverview.onclick=()=>loadOperationalOverview(true);
   const filter=document.querySelector('#intakeFilter');if(filter){filter.value=state.intakeFilter;filter.onchange=()=>{state.intakeFilter=filter.value;loadIntake()};}
   const protocolRefresh=document.querySelector('#refreshProtocol');if(protocolRefresh)protocolRefresh.onclick=loadProtocol;
   const protocolSearch=document.querySelector('#protocolSearch');if(protocolSearch)protocolSearch.oninput=()=>{state.protocolQuery=protocolSearch.value;renderProtocolRows();};
@@ -205,16 +208,116 @@ async function loadProfile(){
  if(!state.session){state.profile=null;return}
  const {data}=await supabase.from('profiles').select('id,display_name,app_role,active').eq('id',state.session.user.id).maybeSingle();state.profile=data||null;
 }
+
+function operationalOverviewMarkup(){
+ return `<div class="operational-overview"><div id="overviewHeadline" class="grid grid-4 overview-headline"><div class="card metric"><strong>—</strong><span>Active attendees</span></div><div class="card metric"><strong>—</strong><span>Open actions</span></div><div class="card metric"><strong>—</strong><span>Billing ready</span></div><div class="card metric"><strong>—</strong><span>Issued and unpaid</span></div></div><section class="section"><div class="surface"><div class="surface-head overview-toolbar"><div><strong>Operational queues</strong><div class="muted small" id="overviewTimestamp">Loading the current event position…</div></div><button class="btn btn-ghost" id="refreshOverview" type="button">Refresh overview</button></div><div class="surface-body" id="operationalOverview"><div class="empty">Checking registrations, rooms, transfers, billing and launch settings…</div></div></div></section></div>`;
+}
+
+function overviewNumber(value){return Number.isFinite(Number(value))?Number(value):0;}
+function overviewStatus(value,{critical=false,clearLabel='Clear',attentionLabel='Needs action'}={}){
+ const count=overviewNumber(value);
+ return count===0?`<span class="status green">${esc(clearLabel)}</span>`:`<span class="status ${critical?'red':'amber'}">${esc(attentionLabel)}</span>`;
+}
+function overviewLink(label,value,description,target,protocolTarget='',options={}){
+ const count=overviewNumber(value),status=overviewStatus(count,options);
+ const attrs=target?`data-overview-target="${esc(target)}"${protocolTarget?` data-protocol-target="${esc(protocolTarget)}"`:''}`:'';
+ const tag=target?'button':'div';
+ return `<${tag} class="overview-line" ${attrs}><span class="overview-line-count">${count}</span><span class="overview-line-copy"><strong>${esc(label)}</strong><small>${esc(description)}</small></span>${status}</${tag}>`;
+}
+function overviewCheck(label,ready,description,target=''){
+ const attrs=target?`data-overview-target="${esc(target)}"`:'';
+ const tag=target?'button':'div';
+ return `<${tag} class="overview-line overview-check" ${attrs}><span class="overview-check-icon ${ready?'ready':'attention'}" aria-hidden="true">${ready?'✓':'!'}</span><span class="overview-line-copy"><strong>${esc(label)}</strong><small>${esc(description)}</small></span><span class="status ${ready?'green':'amber'}">${ready?'Ready':'Setup needed'}</span></${tag}>`;
+}
+function overviewGroup(title,subtitle,rows){return `<section class="overview-group"><div class="overview-group-head"><h3>${esc(title)}</h3><p>${esc(subtitle)}</p></div><div class="overview-lines">${rows.join('')}</div></section>`;}
+
+function openOverviewTarget(button){
+ const target=button.dataset.overviewTarget;
+ if(!target)return;
+ if(target==='admin'&&state.profile?.app_role!=='admin')return;
+ state.staffTab=target;
+ if(target==='protocol'&&button.dataset.protocolTarget)state.protocolSection=button.dataset.protocolTarget;
+ render();window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function bindOperationalOverview(){
+ document.querySelectorAll('[data-overview-target]').forEach(button=>button.onclick=()=>openOverviewTarget(button));
+}
+
+function renderOperationalOverview(){
+ const el=document.querySelector('#operationalOverview'),headline=document.querySelector('#overviewHeadline'),stamp=document.querySelector('#overviewTimestamp');
+ if(!el||!headline)return;
+ if(state.operationalOverviewError){el.innerHTML=`<div class="notice error"><strong>The overview could not be loaded.</strong> ${esc(state.operationalOverviewError)}</div>`;return;}
+ const data=state.operationalOverview;
+ if(!data)return;
+ const h=data.headline||{},registration=data.registration||{},protocol=data.protocol||{},finance=data.finance||{},sponsors=data.sponsors||{},readiness=data.readiness||{},content=data.content||{};
+ headline.innerHTML=`<div class="card metric"><strong>${overviewNumber(h.attendees)}</strong><span>Active attendees</span></div><div class="card metric ${overviewNumber(h.open_actions)?'metric-attention':'metric-ready'}"><strong>${overviewNumber(h.open_actions)}</strong><span>Open actions</span></div><div class="card metric"><strong>${overviewNumber(h.ready_for_invoice)}</strong><span>Billing ready</span></div><div class="card metric ${overviewNumber(h.issued_unpaid)?'metric-attention':''}"><strong>${overviewNumber(h.issued_unpaid)}</strong><span>Issued and unpaid</span></div>`;
+ if(stamp){const generated=data.generated_at?new Date(data.generated_at):new Date();stamp.textContent=`Updated ${generated.toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})} · ${data.event?.name||'ISSSC 2027'}`;}
+ const adminTarget=state.profile?.app_role==='admin'?'admin':'';
+ const notificationTarget=['admin','protocol','operations','content_manager'].includes(state.profile?.app_role)?'notifications':'';
+ const emailProvider=state.invoiceEmailCapabilities?.email_configured;
+ const emailReady=emailProvider===undefined?!!readiness.sender_saved:emailProvider===true;
+ const emailLabel=emailProvider===undefined?'Invoice sender':'Invoice email';
+ const emailDescription=emailProvider===true?'Sender and secure email provider are connected.':emailProvider===false&&readiness.sender_saved?'Sender is saved; the secure provider still needs connecting.':readiness.sender_saved?'An active invoice sender is saved; Admin or Finance verifies the provider.':'Save the invoice sender and connect the secure provider.';
+ el.innerHTML=`<div class="overview-queue-grid">
+ ${overviewGroup('Registration','Requests waiting for Protocol review.',[
+   overviewLink('New registrations',registration.pending,'Review and accept, follow up or reject.','intake','',{critical:true}),
+   overviewLink('Follow-up required',registration.follow_up,'Submitted details need clarification.','intake'),
+   overviewLink('Processing errors',registration.errors,'A submission could not be mapped cleanly.','intake','',{critical:true})
+ ])}
+ ${overviewGroup('Protocol','Rooms, travel, lift passes and manifests.',[
+   overviewLink('Room decisions',protocol.room_awaiting,'Requests awaiting the final Protocol allocation.','protocol','accommodation',{critical:true}),
+   overviewLink('Room waitlist',protocol.room_waitlist,'Requests currently held without a room.','protocol','accommodation',{critical:true}),
+   overviewLink('Lift passes',protocol.lift_pass_unconfirmed,'Required passes not yet confirmed.','protocol','attendees'),
+   overviewLink('Travel records',protocol.travel_unconfirmed,'Entered journeys awaiting Protocol confirmation.','protocol','attendees'),
+   overviewLink('Manifest assignments',protocol.transfers_unassigned,'Confirmed transfer requests not assigned to a matching run.','protocol','transfers',{critical:true}),
+   overviewLink('Transfer run details',protocol.incomplete_runs,'Runs missing contacts, passengers or final status.','protocol','transfers',{critical:true})
+ ])}
+ ${overviewGroup('Finance','Readiness and invoice lifecycle.',[
+   overviewLink('Attendee billing blockers',finance.blocked,'Resolve data, rate or service checks before billing.','finance','',{critical:true}),
+   overviewLink('Ready for invoice',finance.ready,'Attendees whose billing checks are complete.','finance','',{clearLabel:'None waiting',attentionLabel:'Ready'}),
+   overviewLink('Open invoice drafts',finance.open_invoices,'Drafts and reviews not yet approved.','finance'),
+   overviewLink('Approved, not issued',finance.approved_not_issued,'Approved invoices waiting to be issued.','finance'),
+   overviewLink('Overdue invoices',finance.overdue,'Issued invoices past their recorded due date.','finance','',{critical:true})
+ ])}
+ ${overviewGroup('Sponsors','Event-year terms, invitations and rooms.',[
+   overviewLink('Prospective sponsors',sponsors.prospective,'Confirm or close prospective records.','sponsors'),
+   overviewLink('Open invitations',sponsors.pending_invitations,'Invitations not yet accepted, declined or cancelled.','sponsors'),
+   overviewLink('Room over-allocation',sponsors.overallocated,'Sponsor room entitlement has been exceeded.','sponsors','',{critical:true}),
+   overviewLink('Rooms remaining',sponsors.rooms_remaining,'Allocated sponsor places not yet accepted.','sponsors','',{clearLabel:'Fully allocated',attentionLabel:'Available'})
+ ])}
+ </div>
+ <div class="overview-lower-grid">
+ ${overviewGroup('Production configuration','Core controls required for live operation.',[
+   overviewCheck('Billing configuration',!!readiness.billing_confirmed,'Issuer, payment terms and instructions confirmed.',adminTarget),
+   overviewCheck('Approved rate card',overviewNumber(readiness.rates_approved)>0&&overviewNumber(readiness.rates_pending)===0,`${overviewNumber(readiness.rates_approved)} approved · ${overviewNumber(readiness.rates_pending)} awaiting confirmation`,'finance'),
+   overviewCheck('Hotel inventory',overviewNumber(readiness.hotel_rooms)>0&&overviewNumber(readiness.hotel_rooms_unverified)===0,`${overviewNumber(readiness.hotel_rooms)} available · ${overviewNumber(readiness.hotel_rooms_unverified)} unverified`,'protocol'),
+   overviewCheck(emailLabel,emailReady,emailDescription,adminTarget),
+   overviewCheck('Browser notifications',!!readiness.push_configured,`${overviewNumber(readiness.active_notification_devices)} active device${overviewNumber(readiness.active_notification_devices)===1?'':'s'} · ${overviewNumber(readiness.notification_failures_30d)} failures in 30 days`,notificationTarget),
+   overviewCheck('Staff access',overviewNumber(readiness.active_staff)>0,`${overviewNumber(readiness.active_staff)} active staff account${overviewNumber(readiness.active_staff)===1?'':'s'}.`,adminTarget)
+ ])}
+ <section class="overview-group content-health"><div class="overview-group-head"><h3>Published event content</h3><p>Items currently visible in the attendee event app.</p></div><div class="content-health-grid">${[
+   ['Programme',content.programme],['Venues',content.venues],['Results',content.results],['Media',content.media],['Table plans',content.table_plans],['Transfers',content.transfers]
+ ].map(([label,value])=>`<button data-overview-target="content"><strong>${overviewNumber(value)}</strong><span>${esc(label)}</span></button>`).join('')}</div></section>
+ </div>`;
+ bindOperationalOverview();
+}
+
+async function loadOperationalOverview(showToast=false){
+ const el=document.querySelector('#operationalOverview');if(el)el.innerHTML='<div class="empty">Refreshing the operational position…</div>';
+ const canCheckEmail=['admin','finance','read_only'].includes(state.profile?.app_role);
+ if(!canCheckEmail)state.invoiceEmailCapabilities=null;
+ const requests=[supabase.rpc('get_operational_overview',{p_event_id:EVENT_ID})];
+ if(canCheckEmail)requests.push(supabase.functions.invoke('invoice-delivery',{body:{action:'capabilities',event_id:EVENT_ID}}));
+ const [overview,email]=await Promise.all(requests);
+ if(overview.error){state.operationalOverviewError=overview.error.message;state.operationalOverview=null;renderOperationalOverview();return;}
+ state.operationalOverviewError=null;state.operationalOverview=overview.data||null;
+ if(email&&!email.error)state.invoiceEmailCapabilities=email.data||null;
+ renderOperationalOverview();if(showToast)toast('Operational overview refreshed');
+}
+
 async function loadStaffData(){
- if(state.staffTab==='overview'){
-  const [i,a,s,n]=await Promise.all([
-    supabase.from('intake_submissions').select('*',{count:'exact',head:true}).eq('processing_status','pending'),
-    supabase.from('attendees').select('*',{count:'exact',head:true}),
-    supabase.from('event_sponsors').select('*',{count:'exact',head:true}).eq('event_id',EVENT_ID),
-    supabase.from('invoices').select('*',{count:'exact',head:true}).eq('event_id',EVENT_ID)
-  ]);
-  [['mPending',i.count],['mAttendees',a.count],['mSponsors',s.count],['mInvoices',n.count]].forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.textContent=v??'—'});
- }
+ if(state.staffTab==='overview')loadOperationalOverview();
  if(state.staffTab==='intake') loadIntake();
  if(state.staffTab==='protocol'&&state.protocolSection==='accommodation')roomAllocator?.load();
  if(state.staffTab==='protocol'&&state.protocolSection==='transfers')eventFeature?.loadTransfers();

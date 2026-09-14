@@ -3,21 +3,21 @@
 Static single-page web application for Netlify, backed by the Supabase project `ISSSC Attendance & Billing`.
 
 ## Current scope
-- public ISSSC 2027 landing page
-- attendee registration form writing to `intake_submissions`
-- attendee event-app shell
-- Supabase passwordless staff sign-in
-- role-aware staff portal shell with live counts and read-only intake/sponsor/invoice views
-- PWA manifest and service worker
-- security headers suitable for a static Netlify deployment
+
+- public attendee registration and passwordless sign-in
+- role-controlled staff administration and operational overview
+- Protocol attendee records, room allocation, lift passes and transfer manifests
+- sponsor terms, invitations, attendees and room entitlement
+- Finance readiness, confirmed rate card, locked invoice snapshots, PDFs and email audit
+- event programme, Méribel venues, BFBS links, results PDFs, media and table plans
+- staff announcements and attendee browser notifications
+- PWA manifest, offline static assets and production security headers
 
 ## Deployment
-Upload the contents of this directory to the root of the connected GitHub repository, then Netlify will deploy from `main`.
+Upload the release files to the root of the connected GitHub repository. Netlify deploys the `main` branch to `https://ukafwsa-isssc.netlify.app`.
 
-## Important before public launch
-- replace the placeholder SVG mark with the approved UKAFWSA logo asset
-- complete the Association-approved privacy notice
-- configure Supabase Auth redirect/site URLs for the production domain
-- add bot protection to public registration
-- test RLS against each staff role
-- move attendee sensitive fields into a tighter sensitive-details model before broad attendee portal access
+Database migrations in `supabase/migrations` have already been applied to the linked production Supabase project. Do not paste or rerun them manually unless recovering a different environment.
+
+## Before public launch
+
+Use [PRODUCTION-READINESS.md](PRODUCTION-READINESS.md) as the controlled launch checklist. The remaining launch blockers are deliberately visible there and in the staff Operational overview.
