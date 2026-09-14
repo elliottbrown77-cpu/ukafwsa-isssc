@@ -1,5 +1,6 @@
 import { createEventContentFeature } from '/event-content.js';
 import { createRoomAllocator } from '/room-allocation.js';
+import { createAdminSettings } from '/admin-settings.js';
 
 const SUPABASE_URL = 'https://apugxrwhiyvwcrpzvgxj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_WoZaQe5QeUDLb764uMWEtw_78rsp8Mi';
@@ -9,6 +10,7 @@ const TRAVEL_DATE_END = '2027-02-09';
 let supabase = null;
 let eventFeature = null;
 let roomAllocator = null;
+let adminSettings = null;
 
 const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
@@ -96,14 +98,15 @@ return eventFeature ? eventFeature.publicMarkup() : `<div class="hero-mini"><spa
 }
 
 function staffLogin(){
-return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Staff portal</h2><div class="muted">Protocol · Sponsor · Finance · Content</div></div></div><p class="muted">Enter your authorised email address. A secure sign-in link will be sent if your Supabase authentication settings permit it.</p><form id="loginForm" class="form-grid"><div class="field full"><label>Email</label><input name="email" type="email" required placeholder="name@example.com"></div><div class="field full"><button class="btn btn-primary" type="submit">Send sign-in link</button></div><div id="loginResult" class="field full"></div></form></div>`;
+return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Staff portal</h2><div class="muted">Protocol · Sponsor · Finance · Content</div></div></div><p class="muted">Enter your authorised email address and we will send you a secure sign-in link.</p><form id="loginForm" class="form-grid"><div class="field full"><label>Email</label><input name="email" type="email" required placeholder="name@example.com"></div><div class="field full"><button class="btn btn-primary" type="submit">Send sign-in link</button></div><div id="loginResult" class="field full"></div></form></div>`;
 }
 function staffDashboard(){
 const role=state.profile?.app_role || 'authenticated';
-return `<div class="dashboard-shell"><aside class="side"><h3>Staff portal</h3>${[['overview','Overview'],['intake','New registrations'],['protocol','Protocol'],['sponsors','Sponsors'],['finance','Finance'],['content','Event content']].map(([r,l])=>`<button data-stafftab="${r}" class="${state.staffTab===r?'active':''}">${l}</button>`).join('')}<button id="signOutBtn">Sign out</button></aside><div class="dash-main"><div class="hero-mini"><span class="eyebrow">Role: ${role}</span><h2>${staffTitle()}</h2><p>${staffSubtitle()}</p></div><div id="staffPanel">${staffPanel()}</div></div></div>`;
+const tabs=[['overview','Overview'],['intake','New registrations'],['protocol','Protocol'],['sponsors','Sponsors'],['finance','Finance'],['content','Event content'],...(role==='admin'?[['admin','Admin settings']]:[])];
+return `<div class="dashboard-shell"><aside class="side"><h3>Staff portal</h3>${tabs.map(([r,l])=>`<button data-stafftab="${r}" class="${state.staffTab===r?'active':''}">${l}</button>`).join('')}<button id="signOutBtn">Sign out</button></aside><div class="dash-main"><div class="hero-mini"><span class="eyebrow">Role: ${role}</span><h2>${staffTitle()}</h2><p>${staffSubtitle()}</p></div><div id="staffPanel">${staffPanel()}</div></div></div>`;
 }
-function staffTitle(){return ({overview:'Operational overview',intake:'Registration intake',protocol:'Protocol operations',sponsors:'Sponsor management',finance:'Finance & billing',content:'Event app content'})[state.staffTab]}
-function staffSubtitle(){return ({overview:'One view of the event workflow.',intake:'Review public attendee requests before they become canonical records.',protocol:'Confirm hotel, room, transfer, lift pass and usage data.',sponsors:'Permanent organisations with event-year sponsorship and invitations.',finance:'Review rates, billing readiness and immutable invoice snapshots.',content:'Publish announcements, programme, venues, biographies and table plans.'})[state.staffTab]}
+function staffTitle(){return ({overview:'Operational overview',intake:'Registration intake',protocol:'Protocol operations',sponsors:'Sponsor management',finance:'Finance & billing',content:'Event app content',admin:'Administration'})[state.staffTab]}
+function staffSubtitle(){return ({overview:'One view of the event workflow.',intake:'Review public attendee requests before they become canonical records.',protocol:'Confirm hotel, room, transfer, lift pass and usage data.',sponsors:'Permanent organisations with event-year sponsorship and invitations.',finance:'Review rates, billing readiness and immutable invoice snapshots.',content:'Publish announcements, programme, venues, biographies and table plans.',admin:'Manage staff access and operational email settings.'})[state.staffTab]}
 function attendeeProtocolMarkup(){return `<div class="surface"><div class="surface-head"><div><strong>Attendee operations</strong><div class="muted small">Maintain the approved attendee record, then confirm accommodation charging, travel and lift-pass services.</div></div><div class="protocol-tools"><label class="small muted" for="protocolSearch">Find attendee</label><input id="protocolSearch" type="search" placeholder="Name, email or organisation" value="${esc(state.protocolQuery)}"><button class="btn btn-ghost" id="refreshProtocol">Refresh</button></div></div><div class="surface-body"><div id="protocolTable" class="empty">Loading attendees…</div><div id="protocolDetail"></div></div></div>`}
 function protocolWorkspace(){
  const tabs=[['accommodation','Room allocation'],['transfers','Transfers'],['attendees','Attendee records']];
@@ -122,14 +125,19 @@ if(state.staffTab==='finance') return `<div id="financeMetrics" class="grid grid
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Attendee billing readiness</strong><div class="muted small">Resolve each blocker before creating an individual or consolidated draft.</div></div><div class="finance-tools"><input id="financeSearch" type="search" placeholder="Find attendee or account" value="${esc(state.financeQuery)}"><select id="financeFilter" aria-label="Readiness filter"><option value="all">All attendees</option><option value="ready">Ready</option><option value="blocked">Blocked</option><option value="consolidated">Consolidated</option></select><button class="btn btn-ghost" id="refreshFinance">Refresh</button></div></div><div class="surface-body"><div id="financeReadiness" class="empty">Loading billing readiness…</div><div id="financeAttendeeDetail"></div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Consolidated sponsor accounts</strong><div class="muted small">Only attendees explicitly linked for consolidated billing are included.</div></div></div><div class="surface-body"><div id="financeConsolidated" class="empty">Loading sponsor accounts…</div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Invoices</strong><div class="muted small">Review charge lines, confirm the invoice, record issue and then record payment.</div></div></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div><div id="invoiceDetail"></div></div></div></section>`;
+if(state.staffTab==='admin'&&state.profile?.app_role==='admin')return adminSettings?adminSettings.markup():'<div class="surface"><div class="surface-body empty">Loading Admin settings…</div></div>';
 return eventFeature ? eventFeature.staffMarkup() : '<div class="surface"><div class="surface-body empty">Loading event content tools...</div></div>';
 }
-function staff(){return state.session ? staffDashboard() : staffLogin();}
+function staff(){
+ if(!state.session)return staffLogin();
+ if(!state.profile||state.profile.active===false||state.profile.app_role==='attendee')return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark.svg" alt=""><div><h2 style="margin:0">Staff access not authorised</h2><div class="muted">This signed-in email does not have an active staff role.</div></div></div><p class="muted">Ask an administrator to add this email address in Admin settings, then sign in again.</p><button class="btn btn-primary" id="signOutBtn">Sign out</button></div>`;
+ return staffDashboard();
+}
 
 function render(){
   const content = state.route==='register'?register():state.route==='event'?eventApp():state.route==='staff'?staff():home();
   app.innerHTML=layout(content);bind();
-  if(state.route==='staff' && state.session) loadStaffData();
+  if(state.route==='staff' && state.session && state.profile && state.profile.active!==false && state.profile.app_role!=='attendee') loadStaffData();
   if(state.route==='event' && eventFeature) eventFeature.loadPublic();
 }
 function bind(){
@@ -159,6 +167,7 @@ function bind(){
   if(state.route==='staff'&&state.staffTab==='content'&&eventFeature)eventFeature.bindStaff();
   if(state.route==='staff'&&state.staffTab==='protocol'&&state.protocolSection==='transfers'&&eventFeature)eventFeature.bindProtocol();
   if(state.route==='staff'&&state.staffTab==='protocol'&&state.protocolSection==='accommodation'&&roomAllocator)roomAllocator.bind();
+  if(state.route==='staff'&&state.staffTab==='admin'&&adminSettings)adminSettings.bind();
 }
 
 function formObject(form){
@@ -208,6 +217,7 @@ async function loadStaffData(){
  if(state.staffTab==='sponsors') loadSponsors();
  if(state.staffTab==='finance') loadInvoices();
  if(state.staffTab==='content') eventFeature?.loadStaff();
+ if(state.staffTab==='admin'&&state.profile?.app_role==='admin')adminSettings?.load();
 }
 async function loadIntake(){
  const el=document.querySelector('#intakeTable');if(!el)return;el.textContent='Loading registrations…';
@@ -643,7 +653,7 @@ async function loadInvoices(){
 }
 
 async function loadInvoiceEmailCapabilities(){
- const {data,error}=await supabase.functions.invoke('invoice-delivery',{body:{action:'capabilities'}});
+ const {data,error}=await supabase.functions.invoke('invoice-delivery',{body:{action:'capabilities',event_id:EVENT_ID}});
  state.invoiceEmailCapabilities=error?{email_configured:false,error:error.message}:data;
 }
 
@@ -896,7 +906,7 @@ function renderFinanceInvoiceDetail(){
  const canDocument=['approved','issued','paid'].includes(invoice.status),emailConfigured=!!state.invoiceEmailCapabilities?.email_configured;
  const documentActions=canDocument?`<div class="invoice-document-actions"><button class="btn btn-ghost" type="button" data-invoice-document="preview">Preview PDF</button><button class="btn btn-ghost" type="button" data-invoice-document="download">Download PDF</button><div class="service-save-result"></div></div>`:'';
  const sendLabel=invoice.status==='approved'?'Issue and email invoice':successfulDelivery?'Resend invoice email':'Send invoice email';
- const deliveryForm=canEditFinance()&&['approved','issued','paid'].includes(invoice.status)?`<section class="invoice-delivery-panel"><div class="service-group-head"><div><h4>Email invoice</h4><p>The PDF is attached and every attempt is recorded.</p></div>${emailConfigured?'<span class="status green">Email ready</span>':'<span class="status amber">Setup required</span>'}</div>${emailConfigured?'':`<div class="notice warn">PDF preview and download are ready. Email sending will be enabled after the verified sender and Resend key are added to Supabase.</div>`}<form id="financeInvoiceEmailForm" class="form-grid compact-grid"><div class="field"><label>Recipient email *</label><input type="email" name="recipient_email" required value="${esc(recipientEmail)}"></div><div class="field"><label>Email subject *</label><input name="subject" maxlength="250" required value="${esc(`ISSSC 2027 invoice ${invoice.invoice_reference}`)}"></div><div class="field full"><div class="service-actions"><button class="btn btn-primary" type="submit" ${emailConfigured?'':'disabled'}>${esc(sendLabel)}</button><div class="service-save-result"></div></div></div></form></section>`:'';
+ const deliveryForm=canEditFinance()&&['approved','issued','paid'].includes(invoice.status)?`<section class="invoice-delivery-panel"><div class="service-group-head"><div><h4>Email invoice</h4><p>The PDF is attached and every attempt is recorded.</p></div>${emailConfigured?'<span class="status green">Email ready</span>':'<span class="status amber">Setup required</span>'}</div>${emailConfigured?'':`<div class="notice warn">PDF preview and download are ready. Email sending will be enabled after an administrator saves a verified sender address and the secure email provider is connected.</div>`}<form id="financeInvoiceEmailForm" class="form-grid compact-grid"><div class="field"><label>Recipient email *</label><input type="email" name="recipient_email" required value="${esc(recipientEmail)}"></div><div class="field"><label>Email subject *</label><input name="subject" maxlength="250" required value="${esc(`ISSSC 2027 invoice ${invoice.invoice_reference}`)}"></div><div class="field full"><div class="service-actions"><button class="btn btn-primary" type="submit" ${emailConfigured?'':'disabled'}>${esc(sendLabel)}</button><div class="service-save-result"></div></div></div></form></section>`:'';
  const deliveryHistory=deliveries.length?`<section class="invoice-delivery-history"><h4>Email history</h4><div class="delivery-list">${deliveries.map(delivery=>`<div class="delivery-row"><div><strong>${esc(delivery.recipient_email)}</strong><small>${esc(formatDateTime(delivery.accepted_at||delivery.requested_at))} · ${esc(delivery.subject)}</small>${delivery.error_message?`<small class="error-text">${esc(delivery.error_message)}</small>`:''}</div><span class="status ${deliveryStatusClass(delivery.delivery_status)}">${esc(deliveryStatusLabel(delivery.delivery_status))}</span></div>`).join('')}</div></section>`:'';
  const paymentForm=canEditFinance()&&invoice.status==='issued'?`<form id="financePaymentForm" class="form-grid invoice-payment-form"><div class="field"><label>Payment method</label><select name="payment_method"><option value="bank_transfer">Bank transfer</option><option value="card">Card</option><option value="cash">Cash</option><option value="manual">Other / manual</option></select></div><div class="field"><label>Payment reference</label><input name="payment_reference" value="${esc(invoice.payment_reference||'')}"></div><div class="field full"><label>Payment notes</label><textarea name="payment_notes"></textarea></div><div class="field full"><div class="service-actions"><button class="btn btn-primary" type="submit">Mark as paid</button><div class="service-save-result"></div></div></div></form>`:'';
  el.innerHTML=`<section class="invoice-detail"><div class="review-heading"><div><span class="status ${invoiceStatusClass(invoice.status)}">${esc(invoiceStatusLabel(invoice.status))}</span><h3>${esc(invoice.invoice_reference)}</h3><p>${esc(recipient)} · ${invoice.invoice_type==='individual'?'Individual invoice':'Consolidated sponsor invoice'}</p></div><button class="btn btn-ghost btn-small" id="closeInvoice">Close</button></div><div class="invoice-timeline"><div class="${invoice.approved_at?'complete':''}"><small>Confirmed</small><strong>${invoice.approved_at?esc(formatDateTime(invoice.approved_at)):'Pending'}</strong></div><div class="${invoice.issued_at?'complete':''}"><small>Issued</small><strong>${invoice.issued_at?esc(formatDateTime(invoice.issued_at)):'Pending'}</strong></div><div class="${successfulDelivery?'complete':''}"><small>Emailed</small><strong>${successfulDelivery?esc(formatDateTime(successfulDelivery.accepted_at||successfulDelivery.requested_at)):'Pending'}</strong></div><div class="${invoice.paid_at?'complete':''}"><small>Paid</small><strong>${invoice.paid_at?esc(formatDateTime(invoice.paid_at)):'Pending'}</strong></div></div>${lines.length?`<div class="table-scroll"><table class="data-table invoice-lines"><thead><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Net</th><th>VAT</th><th>Gross</th></tr></thead><tbody>${lines.map(line=>`<tr><td><strong>${esc(line.description)}</strong><br><small>${esc(line.rate_code||line.source_type||'')}</small></td><td>${Number(line.quantity||0)}</td><td>${money(line.unit_price)}</td><td>${money(line.net_amount)}</td><td>${money(line.vat_amount)}</td><td>${money(line.gross_amount)}</td></tr>`).join('')}</tbody><tfoot><tr><th colspan="3">Invoice totals</th><th>${money(invoice.net_total)}</th><th>${money(invoice.vat_total)}</th><th>${money(invoice.gross_total)}</th></tr></tfoot></table></div>`:'<div class="notice warn">This draft has no charge lines and cannot progress.</div>'}${documentActions}<form id="financeInvoiceMetadataForm" class="form-grid record-form invoice-metadata-form"><div class="form-section"><h3>Billing and payment details</h3><p>These details remain editable until the invoice is issued.</p></div><div class="field"><label>Purchase order reference</label><input name="purchase_order_reference" value="${esc(invoice.purchase_order_reference||'')}" ${editableMetadata?'':'disabled'}></div><div class="field"><label>Payment terms</label><div class="input-suffix"><input name="payment_terms_days" type="number" min="0" max="365" step="1" value="${terms}" ${editableMetadata?'':'disabled'}><span>days</span></div></div><div class="field"><label>Due date</label><input name="due_date" type="date" value="${esc(invoice.due_date||'')}" ${editableMetadata?'':'disabled'}><small>Leave blank to calculate it when issued.</small></div><div class="field"><label>Payment link</label><input name="payment_link" type="url" value="${esc(invoice.payment_link||'')}" ${editableMetadata?'':'disabled'}></div><div class="field full"><label>Invoice notes</label><textarea name="notes" ${editableMetadata?'':'disabled'}>${esc(invoice.notes||'')}</textarea></div>${editableMetadata?'<div class="field full"><div class="service-actions"><button class="btn btn-ghost" type="submit">Save invoice details</button><div class="service-save-result"></div></div></div>':''}</form><div class="invoice-workflow"><div class="invoice-review-note"><strong>${esc(invoiceStatusLabel(invoice.status))}</strong><span>${esc(workflowMessage)}</span></div>${canEditFinance()&&workflowAction?`<div class="service-actions">${workflowAction}<div class="service-save-result"></div></div>`:''}${deliveryForm}${deliveryHistory}${paymentForm}</div></section>`;
@@ -995,6 +1005,7 @@ async function initialiseBackend(){
   supabase=createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   eventFeature=createEventContentFeature({client:supabase,eventId:EVENT_ID,getSession:()=>state.session,getProfile:()=>state.profile,escapeHtml:esc,toast});
   roomAllocator=createRoomAllocator({client:supabase,eventId:EVENT_ID,getProfile:()=>state.profile,escapeHtml:esc,toast});
+  adminSettings=createAdminSettings({client:supabase,eventId:EVENT_ID,getProfile:()=>state.profile,escapeHtml:esc,toast});
   const {data:{session}}=await supabase.auth.getSession();state.session=session;if(session)finishAuthLanding();await loadProfile();
   supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;if(nextSession)finishAuthLanding();await loadProfile();if(['staff','event'].includes(state.route))render();});
   if(['staff','event'].includes(state.route))render();
