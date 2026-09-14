@@ -1,15 +1,21 @@
+import { createEventContentFeature } from '/event-content.js';
+import { createRoomAllocator } from '/room-allocation.js';
+
 const SUPABASE_URL = 'https://apugxrwhiyvwcrpzvgxj.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_WoZaQe5QeUDLb764uMWEtw_78rsp8Mi';
 const EVENT_ID = '9c1c1d5e-d9f1-4f6b-b323-f3c35261fc19';
 const TRAVEL_DATE_START = '2027-01-27';
 const TRAVEL_DATE_END = '2027-02-09';
 let supabase = null;
+let eventFeature = null;
+let roomAllocator = null;
 
 const ROUTES = new Set(['home','register','event','staff']);
 const isAuthCallback = (hash=location.hash)=>/(?:^#|[&#])(access_token|refresh_token|error|error_code)=/.test(hash);
-let authLanding = new URLSearchParams(location.search).get('next')==='staff' || isAuthCallback();
+const requestedAuthRoute = new URLSearchParams(location.search).get('next') === 'event' ? 'event' : 'staff';
+let authLanding = ['staff','event'].includes(new URLSearchParams(location.search).get('next')) || isAuthCallback();
 const hashRoute = location.hash.replace('#/','');
-const state = { route: authLanding ? 'staff' : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeDeliveries:[], financeRates:[], financePackages:[], financeTravel:[], financeBillingSettings:null, invoiceEmailCapabilities:null, financeQuery:'', financeFilter:'all', financeRateQuery:'', financeRateGroup:'all', financeRateCardOpen:false, financeBillingSettingsOpen:false, selectedFinanceRateId:null, selectedFinanceAttendeeId:null, selectedInvoiceId:null };
+const state = { route: authLanding ? requestedAuthRoute : (ROUTES.has(hashRoute) ? hashRoute : 'home'), session:null, profile:null, staffTab:'overview', protocolSection:'accommodation', intakeFilter:'pending', intakeRows:[], protocolRows:[], protocolQuery:'', protocolLookups:{locations:[],rooms:[],rates:[],organisations:[]}, sponsorRows:[], sponsorContacts:[], sponsorInvitations:[], sponsorAttendees:[], sponsorAllocations:[], sponsorQuery:'', selectedSponsorId:null, selectedSponsorContactId:null, newSponsor:false, financeReadiness:[], financeSummaries:[], financeAttendees:[], financeOrganisations:[], financeSponsors:[], financeInvoices:[], financeLines:[], financeDeliveries:[], financeRates:[], financePackages:[], financeTravel:[], financeBillingSettings:null, invoiceEmailCapabilities:null, financeQuery:'', financeFilter:'all', financeRateQuery:'', financeRateGroup:'all', financeRateCardOpen:false, financeBillingSettingsOpen:false, selectedFinanceRateId:null, selectedFinanceAttendeeId:null, selectedInvoiceId:null };
 const app = document.querySelector('#app');
 
 const icon = (s)=>`<span aria-hidden="true">${s}</span>`;
@@ -86,11 +92,7 @@ ${dateTimeField('departure_resort_datetime','Leave resort date and time','','')}
 }
 
 function eventApp(){
-return `<div class="hero-mini"><span class="eyebrow">Event app</span><h2>ISSSC 2027 in Méribel</h2><p>Designed to work on mobile and install to your home screen.</p></div>
-<div class="grid grid-4"><div class="card metric"><strong>30 Jan</strong><span>Opening weekend</span></div><div class="card metric"><strong>3 Feb</strong><span>Midweek changeover</span></div><div class="card metric"><strong>6 Feb</strong><span>Final day</span></div><div class="card metric"><strong>3V</strong><span>3 Vallées area</span></div></div>
-<section class="section grid grid-2"><div class="surface"><div class="surface-head"><strong>Latest notices</strong><span class="status amber">Live during event</span></div><div class="surface-body"><div class="list"><div class="list-row"><div><strong>Welcome to ISSSC 2027</strong><small>Official announcements and operational updates will appear here.</small></div><span class="status purple">Info</span></div><div class="list-row"><div><strong>Race locations</strong><small>Venue maps and last-minute changes will be published from the staff portal.</small></div><span class="status green">Venue</span></div></div></div></div>
-<div class="surface"><div class="surface-head"><strong>Your event tools</strong></div><div class="surface-body grid grid-2"><div class="card"><div class="icon">📅</div><h3>Programme</h3><p>Daily schedule and ceremonies.</p></div><div class="card"><div class="icon">📍</div><h3>Locations</h3><p>Race and event venues.</p></div><div class="card"><div class="icon">🍽</div><h3>Table plans</h3><p>Published dinner seating plans.</p></div><div class="card"><div class="icon">👤</div><h3>Biographies</h3><p>VIP, guest and key personnel bios.</p></div></div></div></section>
-<div class="notice">Attendee sign-in and personalised booking summary will be switched on once the first registrations have been reviewed and linked to accounts.</div>`;
+return eventFeature ? eventFeature.publicMarkup() : `<div class="hero-mini"><span class="eyebrow">Event app</span><h2>ISSSC 2027 in Méribel</h2><p>Connecting to live event information...</p></div><div class="surface"><div class="surface-body empty">Loading event app...</div></div>`;
 }
 
 function staffLogin(){
@@ -102,10 +104,16 @@ return `<div class="dashboard-shell"><aside class="side"><h3>Staff portal</h3>${
 }
 function staffTitle(){return ({overview:'Operational overview',intake:'Registration intake',protocol:'Protocol operations',sponsors:'Sponsor management',finance:'Finance & billing',content:'Event app content'})[state.staffTab]}
 function staffSubtitle(){return ({overview:'One view of the event workflow.',intake:'Review public attendee requests before they become canonical records.',protocol:'Confirm hotel, room, transfer, lift pass and usage data.',sponsors:'Permanent organisations with event-year sponsorship and invitations.',finance:'Review rates, billing readiness and immutable invoice snapshots.',content:'Publish announcements, programme, venues, biographies and table plans.'})[state.staffTab]}
+function attendeeProtocolMarkup(){return `<div class="surface"><div class="surface-head"><div><strong>Attendee operations</strong><div class="muted small">Maintain the approved attendee record, then confirm accommodation charging, travel and lift-pass services.</div></div><div class="protocol-tools"><label class="small muted" for="protocolSearch">Find attendee</label><input id="protocolSearch" type="search" placeholder="Name, email or organisation" value="${esc(state.protocolQuery)}"><button class="btn btn-ghost" id="refreshProtocol">Refresh</button></div></div><div class="surface-body"><div id="protocolTable" class="empty">Loading attendees…</div><div id="protocolDetail"></div></div></div>`}
+function protocolWorkspace(){
+ const tabs=[['accommodation','Room allocation'],['transfers','Transfers'],['attendees','Attendee records']];
+ const content=state.protocolSection==='accommodation'?(roomAllocator?roomAllocator.markup():'<div class="surface"><div class="surface-body empty">Loading room allocation tools…</div></div>'):state.protocolSection==='transfers'?(eventFeature?eventFeature.protocolMarkup():''):attendeeProtocolMarkup();
+ return `<nav class="protocol-workspace-nav" aria-label="Protocol work areas">${tabs.map(([key,label])=>`<button data-protocol-section="${key}" class="${state.protocolSection===key?'active':''}">${label}</button>`).join('')}</nav>${content}`;
+}
 function staffPanel(){
 if(state.staffTab==='overview') return `<div class="grid grid-4"><div class="card metric"><strong id="mPending">—</strong><span>Pending registrations</span></div><div class="card metric"><strong id="mAttendees">—</strong><span>Attendees</span></div><div class="card metric"><strong id="mSponsors">—</strong><span>Event sponsors</span></div><div class="card metric"><strong id="mInvoices">—</strong><span>Invoices</span></div></div><section class="section"><div class="surface"><div class="surface-head"><strong>Workflow</strong></div><div class="surface-body grid grid-3"><div class="card"><span class="status purple">1</span><h3>Review intake</h3><p>Public form submissions remain requests until Protocol accepts them.</p></div><div class="card"><span class="status purple">2</span><h3>Confirm services</h3><p>Assigned hotel, room, travel, passes and extras become the billable truth.</p></div><div class="card"><span class="status purple">3</span><h3>Issue invoice</h3><p>Finance reviews approved rates and snapshots immutable invoice lines.</p></div></div></div></section>`;
 if(state.staffTab==='intake') return `<div class="surface"><div class="surface-head"><div><strong>Registration review</strong><div class="muted small">Open a request to review every submitted detail before making a decision.</div></div><div class="intake-tools"><label class="small muted" for="intakeFilter">Show</label><select id="intakeFilter"><option value="pending">Pending</option><option value="review_required">Needs follow-up</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="all">All</option></select><button class="btn btn-ghost" id="refreshIntake">Refresh</button></div></div><div class="surface-body"><div id="intakeTable" class="empty">Loading registrations…</div><div id="intakeDetail"></div></div></div>`;
-if(state.staffTab==='protocol') return `<div class="surface"><div class="surface-head"><div><strong>Attendee operations</strong><div class="muted small">Maintain the approved attendee record, then confirm accommodation, travel and lift-pass services.</div></div><div class="protocol-tools"><label class="small muted" for="protocolSearch">Find attendee</label><input id="protocolSearch" type="search" placeholder="Name, email or organisation" value="${esc(state.protocolQuery)}"><button class="btn btn-ghost" id="refreshProtocol">Refresh</button></div></div><div class="surface-body"><div id="protocolTable" class="empty">Loading attendees…</div><div id="protocolDetail"></div></div></div>`;
+if(state.staffTab==='protocol') return protocolWorkspace();
 if(state.staffTab==='sponsors') return `<div class="surface"><div class="surface-head"><div><strong>Event sponsors</strong><div class="muted small">Manage sponsor terms, billing details, contacts, invitations and attendee accounts.</div></div><div class="sponsor-tools"><input id="sponsorSearch" type="search" placeholder="Find sponsor" value="${esc(state.sponsorQuery)}"><button class="btn btn-ghost" id="refreshSponsors">Refresh</button>${canEditSponsors()?'<button class="btn btn-primary" id="addSponsor">Add sponsor</button>':''}</div></div><div class="surface-body"><div id="sponsorMetrics"></div><div id="sponsorTable" class="empty">Loading sponsors…</div><div id="sponsorDetail"></div></div></div>`;
 if(state.staffTab==='finance') return `<div id="financeMetrics" class="grid grid-4"><div class="card metric"><strong>—</strong><span>Ready for invoice</span></div><div class="card metric"><strong>—</strong><span>Blocked</span></div><div class="card metric"><strong>—</strong><span>Draft invoices</span></div><div class="card metric"><strong>—</strong><span>Draft value</span></div></div>
 <section class="section"><div class="notice"><strong>Invoice snapshots are protected.</strong> Rate changes update current calculations and mark open drafts for rebuilding. Confirmed, issued and paid invoice lines retain the values captured when they were confirmed.</div></section>
@@ -114,7 +122,7 @@ if(state.staffTab==='finance') return `<div id="financeMetrics" class="grid grid
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Attendee billing readiness</strong><div class="muted small">Resolve each blocker before creating an individual or consolidated draft.</div></div><div class="finance-tools"><input id="financeSearch" type="search" placeholder="Find attendee or account" value="${esc(state.financeQuery)}"><select id="financeFilter" aria-label="Readiness filter"><option value="all">All attendees</option><option value="ready">Ready</option><option value="blocked">Blocked</option><option value="consolidated">Consolidated</option></select><button class="btn btn-ghost" id="refreshFinance">Refresh</button></div></div><div class="surface-body"><div id="financeReadiness" class="empty">Loading billing readiness…</div><div id="financeAttendeeDetail"></div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Consolidated sponsor accounts</strong><div class="muted small">Only attendees explicitly linked for consolidated billing are included.</div></div></div><div class="surface-body"><div id="financeConsolidated" class="empty">Loading sponsor accounts…</div></div></div></section>
 <section class="section"><div class="surface"><div class="surface-head"><div><strong>Invoices</strong><div class="muted small">Review charge lines, confirm the invoice, record issue and then record payment.</div></div></div><div class="surface-body"><div id="invoiceTable" class="empty">Loading invoices…</div><div id="invoiceDetail"></div></div></div></section>`;
-return `<div class="grid grid-3"><div class="card"><div class="icon">📣</div><h3>Announcements</h3><p>Create priority messages and expiry times.</p></div><div class="card"><div class="icon">📅</div><h3>Programme</h3><p>Publish schedule items by venue and audience.</p></div><div class="card"><div class="icon">📄</div><h3>Documents & table plans</h3><p>Publish versioned event resources without rebuilding the app.</p></div></div>`;
+return eventFeature ? eventFeature.staffMarkup() : '<div class="surface"><div class="surface-body empty">Loading event content tools...</div></div>';
 }
 function staff(){return state.session ? staffDashboard() : staffLogin();}
 
@@ -122,6 +130,7 @@ function render(){
   const content = state.route==='register'?register():state.route==='event'?eventApp():state.route==='staff'?staff():home();
   app.innerHTML=layout(content);bind();
   if(state.route==='staff' && state.session) loadStaffData();
+  if(state.route==='event' && eventFeature) eventFeature.loadPublic();
 }
 function bind(){
   document.querySelectorAll('[data-route]').forEach(b=>b.addEventListener('click',()=>setRoute(b.dataset.route)));
@@ -130,6 +139,7 @@ function bind(){
   const reg=document.querySelector('#registrationForm');if(reg) reg.addEventListener('submit',submitRegistration);
   const login=document.querySelector('#loginForm');if(login) login.addEventListener('submit',sendLoginLink);
   document.querySelectorAll('[data-stafftab]').forEach(b=>b.onclick=()=>{state.staffTab=b.dataset.stafftab;render()});
+  document.querySelectorAll('[data-protocol-section]').forEach(b=>b.onclick=()=>{state.protocolSection=b.dataset.protocolSection;render()});
   const out=document.querySelector('#signOutBtn');if(out) out.onclick=async()=>{await supabase.auth.signOut();state.session=null;state.profile=null;render();};
   const ref=document.querySelector('#refreshIntake');if(ref) ref.onclick=loadIntake;
   const filter=document.querySelector('#intakeFilter');if(filter){filter.value=state.intakeFilter;filter.onchange=()=>{state.intakeFilter=filter.value;loadIntake()};}
@@ -145,6 +155,10 @@ function bind(){
   const toggleFinanceRates=document.querySelector('#toggleFinanceRates');if(toggleFinanceRates)toggleFinanceRates.onclick=()=>{state.financeRateCardOpen=!state.financeRateCardOpen;const content=document.querySelector('#financeRateContent');content?.classList.toggle('hidden',!state.financeRateCardOpen);toggleFinanceRates.setAttribute('aria-expanded',String(state.financeRateCardOpen));toggleFinanceRates.querySelector('span:first-child').textContent=`${state.financeRateCardOpen?'Hide':'Show'} rate card`;toggleFinanceRates.querySelector('.rate-card-chevron').textContent=state.financeRateCardOpen?'▲':'▼';if(state.financeRateCardOpen)renderFinanceRates();};
   const financeRateSearch=document.querySelector('#financeRateSearch');if(financeRateSearch)financeRateSearch.oninput=()=>{state.financeRateQuery=financeRateSearch.value;renderFinanceRates();};
   const financeRateGroup=document.querySelector('#financeRateGroup');if(financeRateGroup){financeRateGroup.value=state.financeRateGroup;financeRateGroup.onchange=()=>{state.financeRateGroup=financeRateGroup.value;renderFinanceRates();};}
+  if(state.route==='event'&&eventFeature)eventFeature.bindPublic();
+  if(state.route==='staff'&&state.staffTab==='content'&&eventFeature)eventFeature.bindStaff();
+  if(state.route==='staff'&&state.staffTab==='protocol'&&state.protocolSection==='transfers'&&eventFeature)eventFeature.bindProtocol();
+  if(state.route==='staff'&&state.staffTab==='protocol'&&state.protocolSection==='accommodation'&&roomAllocator)roomAllocator.bind();
 }
 
 function formObject(form){
@@ -188,9 +202,12 @@ async function loadStaffData(){
   [['mPending',i.count],['mAttendees',a.count],['mSponsors',s.count],['mInvoices',n.count]].forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.textContent=v??'—'});
  }
  if(state.staffTab==='intake') loadIntake();
- if(state.staffTab==='protocol') loadProtocol();
+ if(state.staffTab==='protocol'&&state.protocolSection==='accommodation')roomAllocator?.load();
+ if(state.staffTab==='protocol'&&state.protocolSection==='transfers')eventFeature?.loadTransfers();
+ if(state.staffTab==='protocol'&&state.protocolSection==='attendees')loadProtocol();
  if(state.staffTab==='sponsors') loadSponsors();
  if(state.staffTab==='finance') loadInvoices();
+ if(state.staffTab==='content') eventFeature?.loadStaff();
 }
 async function loadIntake(){
  const el=document.querySelector('#intakeTable');if(!el)return;el.textContent='Loading registrations…';
@@ -965,7 +982,7 @@ window.addEventListener('hashchange',()=>{
 
 function finishAuthLanding(){
  if(!authLanding)return;
- authLanding=false;state.route='staff';history.replaceState(null,'',`${location.pathname}#/staff`);
+ authLanding=false;state.route=requestedAuthRoute;history.replaceState(null,'',`${location.pathname}#/${requestedAuthRoute}`);
 }
 
 // Render the public experience before connecting to the remote data service.
@@ -976,9 +993,11 @@ async function initialiseBackend(){
  try{
   const {createClient}=await import('/supabase-client.js');
   supabase=createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+  eventFeature=createEventContentFeature({client:supabase,eventId:EVENT_ID,getSession:()=>state.session,getProfile:()=>state.profile,escapeHtml:esc,toast});
+  roomAllocator=createRoomAllocator({client:supabase,eventId:EVENT_ID,getProfile:()=>state.profile,escapeHtml:esc,toast});
   const {data:{session}}=await supabase.auth.getSession();state.session=session;if(session)finishAuthLanding();await loadProfile();
-  supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;if(nextSession)finishAuthLanding();await loadProfile();if(state.route==='staff')render();});
-  if(state.route==='staff')render();
+  supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;if(nextSession)finishAuthLanding();await loadProfile();if(['staff','event'].includes(state.route))render();});
+  if(['staff','event'].includes(state.route))render();
  }catch(error){
   console.error('Secure service connection failed',error);
   if(state.route==='staff')toast('The secure staff service is currently unavailable.');
