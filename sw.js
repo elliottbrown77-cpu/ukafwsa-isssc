@@ -1,5 +1,28 @@
-const CACHE='ukafwsa-isssc-v23';
+const CACHE='ukafwsa-isssc-v25';
 const CORE=['/','/index.html','/styles.css','/app.js','/event-content.js','/room-allocation.js','/admin-settings.js','/supabase-client.js','/ukafwsa-mark.svg','/ukafwsa-snowflake.svg','/icon-192.png','/icon-512.png','/maskable-512.png','/manifest.webmanifest'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));return r}).catch(()=>caches.match(e.request).then(r=>r||caches.match('/index.html'))))});
+self.addEventListener('push',event=>{
+  let data={};
+  try{data=event.data?.json()||{}}catch{data={body:event.data?.text()||'A new ISSSC notice is available.'}}
+  const title=data.title||'ISSSC 2027';
+  const options={
+    body:data.body||'Open the Event app for details.',
+    icon:'/icon-192.png',
+    badge:'/ukafwsa-snowflake.svg',
+    tag:data.tag||'isssc-event-notice',
+    data:{url:data.url||'/#/event'},
+    renotify:!!data.urgent,
+  };
+  event.waitUntil(self.registration.showNotification(title,options));
+});
+self.addEventListener('notificationclick',event=>{
+  event.notification.close();
+  const target=new URL(event.notification.data?.url||'/#/event',self.location.origin).href;
+  event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(clients=>{
+    const existing=clients.find(client=>client.url.startsWith(self.location.origin));
+    if(existing){existing.navigate(target);return existing.focus();}
+    return self.clients.openWindow(target);
+  }));
+});

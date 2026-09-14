@@ -4,15 +4,17 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
   const esc = escapeHtml;
   const state = {
     publicSection: 'today',
-    staffSection: 'announcements',
+    staffSection: 'programme',
     announcements: [], venues: [], schedule: [], documents: [], results: [], media: [],
     plans: [], tables: [], assignments: [], transfers: [], passengers: [],
-    attendees: [], sponsors: [],
+    attendees: [], sponsors: [], notificationDeliveries: [],
+    pushStatus: null, pushEnabled: false, pushSupported: true, notificationResult: null,
     selected: {},
   };
 
   const role = () => getProfile()?.app_role || 'attendee';
   const canContent = () => ['admin', 'operations', 'content_manager'].includes(role());
+  const canNotify = () => ['admin', 'protocol', 'operations', 'content_manager'].includes(role());
   const canTables = () => ['admin', 'protocol', 'operations', 'content_manager'].includes(role());
   const canTransfers = () => ['admin', 'protocol', 'operations'].includes(role());
   const statusClass = value => value ? 'green' : 'amber';
@@ -56,6 +58,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
 
   function publicMarkup() {
     return `<div class="hero-mini event-app-hero"><span class="eyebrow">Event app</span><h2>ISSSC 2027 in Méribel</h2><p>Live programme, race locations, results, coverage and operational information.</p></div>
+    <section id="notificationOptIn" class="notification-opt-in">${getSession() ? '<div><strong>Event alerts</strong><p>Checking browser notification settings...</p></div>' : '<div><strong>Event alerts</strong><p>Sign in to enable urgent changes and operational notices on this device.</p></div><form id="notificationLoginForm" class="notification-login"><input type="email" name="email" required aria-label="Email address" placeholder="name@example.com"><button class="btn btn-primary btn-small" type="submit">Send sign-in link</button><div class="service-save-result"></div></form>'}</section>
     <div class="event-app-nav" role="navigation" aria-label="Event information">
       ${[['today','Today'],['programme','Programme'],['locations','Locations'],['results','Results'],['media','Media'],['coverage','BFBS'],['tables','Table plans'],['transfers','Transfers']].map(([id,label]) => `<button class="${state.publicSection === id ? 'active' : ''}" data-event-section="${id}">${label}</button>`).join('')}
     </div>
@@ -68,6 +71,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
       document.querySelectorAll('[data-event-section]').forEach(item => item.classList.toggle('active', item === button));
       renderPublicContent();
     });
+    bindNotificationOptIn();
   }
 
   async function loadPublic() {
@@ -94,6 +98,94 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
       state.plans = []; state.tables = []; state.assignments = []; state.transfers = []; state.passengers = [];
     }
     renderPublicContent();
+    await refreshNotificationOptIn();
+  }
+
+  function notificationOptInMarkup() {
+    if (!state.pushSupported) return '<div><strong>Event alerts</strong><p>This browser does not support web notifications. Notices remain available in the Event app.</p></div>';
+    if (Notification.permission === 'denied') return '<div><strong>Event alerts are blocked</strong><p>Allow notifications for this site in your browser settings, then reload the page.</p></div>';
+    if (state.pushEnabled) return '<div><span class="status green">Enabled</span><strong>Event alerts</strong><p>This device will receive published ISSSC operational notifications.</p></div><button class="btn btn-ghost btn-small" id="disableEventAlerts" type="button">Turn off</button>';
+    return '<div><strong>Event alerts</strong><p>Receive urgent changes and operational notices on this device.</p></div><button class="btn btn-primary btn-small" id="enableEventAlerts" type="button">Enable alerts</button>';
+  }
+
+  function bindNotificationOptIn() {
+    const enable = document.querySelector('#enableEventAlerts');
+    const disable = document.querySelector('#disableEventAlerts');
+    const login = document.querySelector('#notificationLoginForm');
+    if (enable) enable.onclick = enableEventAlerts;
+    if (disable) disable.onclick = disableEventAlerts;
+    if (login) login.onsubmit = async event => {
+      event.preventDefault();
+      const result = login.querySelector('.service-save-result'), button = login.querySelector('button');
+      button.disabled = true; button.textContent = 'Sending...';
+      const email = new FormData(login).get('email');
+      const response = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/?next=event` } });
+      message(result, response.error ? response.error.message : 'Check your email for the secure sign-in link.', response.error ? 'error' : 'success');
+      button.disabled = false; button.textContent = 'Send sign-in link';
+    };
+  }
+
+  async function refreshNotificationOptIn() {
+    const el = document.querySelector('#notificationOptIn');
+    if (!el || !getSession()) return;
+    state.pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    if (state.pushSupported) {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (subscription) {
+          const existing = await client.from('push_subscriptions').select('active').eq('endpoint', subscription.endpoint).maybeSingle();
+          state.pushEnabled = !!existing.data?.active;
+        } else state.pushEnabled = false;
+      } catch { state.pushEnabled = false; }
+    }
+    el.innerHTML = notificationOptInMarkup();
+    bindNotificationOptIn();
+  }
+
+  function urlBase64ToUint8Array(value) {
+    const padding = '='.repeat((4 - value.length % 4) % 4);
+    const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+    return Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+  }
+
+  async function enableEventAlerts() {
+    const button = document.querySelector('#enableEventAlerts');
+    if (button) { button.disabled = true; button.textContent = 'Enabling...'; }
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('Notification permission was not granted.');
+      const config = await client.functions.invoke('push-public-config', { method: 'GET' });
+      if (config.error || !config.data?.enabled || !config.data?.vapid_public_key) throw new Error('Event notifications are not configured yet.');
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(config.data.vapid_public_key) });
+      const json = subscription.toJSON();
+      const saved = await client.from('push_subscriptions').upsert({
+        user_id: getSession().user.id,
+        endpoint: subscription.endpoint,
+        p256dh: json.keys?.p256dh,
+        auth_key: json.keys?.auth,
+        user_agent: navigator.userAgent,
+        active: true,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'endpoint' });
+      if (saved.error) throw saved.error;
+      state.pushEnabled = true;
+      toast('Event alerts enabled on this device');
+    } catch (error) { toast(error.message || 'Unable to enable event alerts'); }
+    await refreshNotificationOptIn();
+  }
+
+  async function disableEventAlerts() {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      await client.from('push_subscriptions').update({ active: false, updated_at: new Date().toISOString() }).eq('endpoint', subscription.endpoint);
+      await subscription.unsubscribe();
+    }
+    state.pushEnabled = false;
+    toast('Event alerts turned off on this device');
+    await refreshNotificationOptIn();
   }
 
   function eventLoginMarkup(subject) {
@@ -146,10 +238,15 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
   }
 
   function staffMarkup() {
+    if (state.staffSection === 'announcements') state.staffSection = 'programme';
     return `<div class="content-admin-nav">${[
-      ['announcements','Announcements'],['programme','Programme & BFBS'],['venues','Méribel locations'],
+      ['programme','Programme & BFBS'],['venues','Méribel locations'],
       ['results','Race results'],['media','Media'],['tables','Table plans'],
     ].map(([id,label]) => `<button class="${state.staffSection === id ? 'active' : ''}" data-content-section="${id}">${label}</button>`).join('')}</div><div id="contentAdminPanel"><div class="surface"><div class="surface-body empty">Loading event content...</div></div></div>`;
+  }
+
+  function notificationMarkup() {
+    return '<div id="contentAdminPanel"><section class="surface"><div class="surface-body empty">Loading notifications...</div></section></div>';
   }
 
   function bindStaff() {
@@ -172,7 +269,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
       client.from('table_plans').select('*').eq('event_id', eventId).order('event_date'),
       client.from('seating_tables').select('*').eq('event_id', eventId).order('sort_order'),
       client.from('seating_assignments').select('*').order('seat_number'),
-      client.from('attendees').select('id,title_rank,first_name,surname,email,mobile,attendance_status').eq('event_id', eventId).neq('attendance_status', 'cancelled').order('surname').order('first_name'),
+      client.from('attendees').select('id,title_rank,first_name,surname,email,mobile,attendance_status,record_source').eq('event_id', eventId).neq('attendance_status', 'cancelled').order('surname').order('first_name'),
       client.from('event_sponsors').select('id,organisation_id,sponsor_status,active,organisations(id,organisation_name,short_name)').eq('event_id', eventId).eq('active', true),
     ]);
     const failed = results.find(result => result.error);
@@ -185,8 +282,30 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     renderStaffContent();
   }
 
+  async function loadNotifications() {
+    state.staffSection = 'announcements';
+    const results = await Promise.all([
+      client.from('announcements').select('*').eq('event_id', eventId).order('created_at', { ascending: false }),
+      client.from('attendees').select('id,category,service').eq('event_id', eventId).neq('attendance_status', 'cancelled'),
+      client.from('notification_deliveries').select('*').eq('event_id', eventId).order('requested_at', { ascending: false }).limit(50),
+      client.functions.invoke('send-push-announcement', { body: { action: 'status' } }),
+    ]);
+    const failed = results.slice(0, 3).find(result => result.error);
+    if (failed) {
+      const panel = document.querySelector('#contentAdminPanel');
+      if (panel) message(panel, failed.error.message);
+      return;
+    }
+    state.announcements = results[0].data || [];
+    state.attendees = results[1].data || [];
+    state.notificationDeliveries = results[2].data || [];
+    state.pushStatus = results[3].error ? null : results[3].data;
+    renderStaffContent();
+  }
+
   function adminList(rows, render, kind, editable = canContent()) {
-    return `<div class="content-record-list">${rows.length ? rows.map(render).join('') : '<div class="empty">No records have been created yet.</div>'}</div>${editable ? `<button class="btn btn-primary" type="button" data-new-content="${kind}">Add ${kind === 'programme' ? 'programme item' : kind.replace(/s$/, '')}</button>` : ''}`;
+    const addLabel = kind === 'programme' ? 'programme item' : kind === 'announcements' ? 'notification' : kind.replace(/s$/, '');
+    return `<div class="content-record-list">${rows.length ? rows.map(render).join('') : '<div class="empty">No records have been created yet.</div>'}</div>${editable ? `<button class="btn btn-primary" type="button" data-new-content="${kind}">Add ${addLabel}</button>` : ''}`;
   }
 
   function editorActions(kind, id) {
@@ -194,7 +313,10 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
   }
 
   function announcementEditor(row = {}) {
-    return `<form id="announcementEditor" class="form-grid record-form content-editor" data-record-id="${row.id || ''}"><div class="form-section"><h3>${row.id ? 'Edit' : 'New'} announcement</h3><p>Use urgent sparingly for safety or immediate operational changes.</p></div><div class="field"><label>Title *</label><input name="title" required maxlength="160" value="${esc(row.title || '')}"></div><div class="field"><label>Priority</label><select name="priority"><option value="normal"${selected(row.priority, 'normal')}>Normal</option><option value="important"${selected(row.priority, 'important')}>Important</option><option value="urgent"${selected(row.priority, 'urgent')}>Urgent</option></select></div><div class="field full"><label>Message *</label><textarea name="body" required>${esc(row.body || '')}</textarea></div><div class="field"><label>Publish from *</label><input type="datetime-local" name="publish_at" required value="${esc(localInput(row.publish_at) || '2027-01-30T08:00')}"></div><div class="field"><label>Expires</label><input type="datetime-local" name="expires_at" value="${esc(localInput(row.expires_at))}"></div><div class="field"><label>Link label</label><input name="action_label" value="${esc(row.action_label || '')}"></div><div class="field"><label>Link URL</label><input type="url" name="action_url" value="${esc(row.action_url || '')}"></div><div class="field checkbox full"><input id="announcementPublished" type="checkbox" name="published"${checked(row.published)}><label for="announcementPublished">Published in the Event app</label></div>${editorActions('announcements', row.id)}</form>`;
+    const categories = [...new Set(state.attendees.map(item => item.category).filter(Boolean))].sort();
+    const services = [...new Set(state.attendees.map(item => item.service).filter(Boolean))].sort();
+    const audience = row.audience?.[0] || 'all';
+    return `<form id="announcementEditor" class="form-grid record-form content-editor" data-record-id="${row.id || ''}"><div class="form-section"><h3>${row.id ? 'Edit' : 'New'} notification</h3><p>Use urgent sparingly for safety or immediate operational changes. Sending now also publishes the notice in the Event app.</p></div><div class="field"><label>Title *</label><input name="title" required maxlength="160" value="${esc(row.title || '')}"></div><div class="field"><label>Priority</label><select name="priority"><option value="normal"${selected(row.priority, 'normal')}>Normal</option><option value="important"${selected(row.priority, 'important')}>Important</option><option value="urgent"${selected(row.priority, 'urgent')}>Urgent</option></select></div><div class="field full"><label>Message *</label><textarea name="body" required maxlength="1000">${esc(row.body || '')}</textarea></div><div class="field"><label>Audience</label><select name="audience"><option value="all"${selected(audience,'all')}>Everyone with alerts enabled</option><option value="attendees"${selected(audience,'attendees')}>All registered attendees</option><option value="staff"${selected(audience,'staff')}>Staff only</option>${categories.length ? `<optgroup label="Attendee category">${categories.map(value => `<option value="category:${esc(value.toLowerCase())}"${selected(audience,`category:${value.toLowerCase()}`)}>${esc(value)}</option>`).join('')}</optgroup>` : ''}${services.length ? `<optgroup label="Service">${services.map(value => `<option value="service:${esc(value.toLowerCase())}"${selected(audience,`service:${value.toLowerCase()}`)}>${esc(value)}</option>`).join('')}</optgroup>` : ''}</select><small>Only devices that have enabled Event alerts can receive a browser notification.</small></div><div class="field"><label>Expires</label><input type="datetime-local" name="expires_at" value="${esc(localInput(row.expires_at))}"></div><div class="field"><label>Link label</label><input name="action_label" value="${esc(row.action_label || '')}" placeholder="Open event app"></div><div class="field"><label>Link URL</label><input type="url" name="action_url" value="${esc(row.action_url || '')}" placeholder="https://..."></div><div class="field checkbox full"><input id="announcementPublished" type="checkbox" name="published"${checked(row.published)}><div><label for="announcementPublished">Published in the Event app</label><small>Use Save without sending when this should be an in-app notice only.</small></div></div><div class="field full"><div class="service-actions"><button class="btn btn-ghost" type="submit" data-notification-action="save">${row.id ? 'Save changes' : 'Save draft'}</button><button class="btn btn-primary" type="submit" data-notification-action="send">${row.push_sent_at ? 'Send again' : 'Publish and send now'}</button>${row.id && canContent() ? `<button class="btn btn-danger" type="button" data-delete-content="announcements" data-delete-id="${row.id}">Delete</button>` : ''}<button class="btn btn-ghost" type="button" data-cancel-content>Cancel</button><div class="service-save-result"></div></div></div></form>`;
   }
 
   function programmeEditor(row = {}) {
@@ -215,7 +337,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
 
   function tablePlanEditor(plan) {
     const tables = state.tables.filter(table => table.table_plan_id === plan.id);
-    const attendeeOptions = state.attendees.map(item => ({ value: `attendee:${item.id}`, label: `${item.title_rank || ''} ${item.first_name} ${item.surname}`.trim() }));
+    const attendeeOptions = state.attendees.map(item => ({ value: `attendee:${item.id}`, label: `${item.title_rank || ''} ${item.first_name} ${item.surname}${item.record_source==='protocol_manual'?' · Protocol entry':''}`.trim() }));
     const sponsorOptions = state.sponsors.map(item => ({ value: `sponsor:${item.id}`, label: item.organisations?.short_name || item.organisations?.organisation_name || 'Sponsor' }));
     return `<div class="table-plan-editor"><form id="tablePlanMetadata" class="form-grid record-form" data-plan-id="${plan.id}"><div class="form-section"><h3>${esc(formatDate(plan.event_date))}</h3><p>There is no automatic sponsor rotation. Every seat remains a manual decision.</p></div><div class="field"><label>Dinner time</label><input type="time" name="dinner_time" value="${esc(plan.dinner_time?.slice(0,5) || '19:30')}"></div><div class="field"><label>Venue</label><select name="venue_id">${options(state.venues,plan.venue_id,item => item.name,'No venue')}</select></div><div class="field full"><label>Plan notes</label><textarea name="notes">${esc(plan.notes || '')}</textarea></div><div class="field checkbox full"><input id="planPublished" type="checkbox" name="published"${checked(plan.published)}><div><label for="planPublished">Publish this evening’s table plan</label><small>All three tables become visible to signed-in attendees.</small></div></div><div class="field full"><button class="btn btn-primary" type="submit">Save table-plan details</button><div class="service-save-result"></div></div></form><div class="vip-table-grid">${tables.map(table => {
       const assignments = state.assignments.filter(item => item.seating_table_id === table.id);
@@ -234,7 +356,16 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     const current = state.selected[state.staffSection];
     if (state.staffSection === 'announcements') {
       const row = current && current !== 'new' ? state.announcements.find(item => item.id === current) : null;
-      el.innerHTML = `<section class="surface"><div class="surface-head"><div><strong>Announcements</strong><div class="small muted">Notices can be scheduled, expired and linked to further information.</div></div></div><div class="surface-body">${adminList(state.announcements, item => `<article class="content-record"><div><span class="status ${item.published ? 'green' : 'amber'}">${item.published ? 'Published' : 'Draft'}</span><h3>${esc(item.title)}</h3><p>${esc(item.body)}</p><small>${esc(formatDate(item.publish_at))} ${esc(formatTime(item.publish_at))}</small></div><button class="btn btn-ghost btn-small" data-edit-content="announcements" data-edit-id="${item.id}">Open</button></article>`, 'announcements')}${current ? announcementEditor(row || {}) : ''}</div></section>`;
+      const subscriberCount = state.pushStatus?.active_subscriptions ?? 0;
+      const deliveryByAnnouncement = id => state.notificationDeliveries.filter(item => item.announcement_id === id);
+      const audienceLabel = item => {
+        const value = item.audience?.[0] || 'all';
+        if (value === 'all') return 'Everyone';
+        if (value === 'attendees') return 'All attendees';
+        if (value === 'staff') return 'Staff';
+        return value.replace(/^(category|service):/, '');
+      };
+      el.innerHTML = `<section class="surface notification-admin"><div class="surface-head"><div><strong>Staff notifications</strong><div class="small muted">Compose an in-app notice and optionally send it immediately to enrolled devices.</div></div><div class="notification-subscriber-count"><strong>${Number(subscriberCount)}</strong><span>active device${Number(subscriberCount) === 1 ? '' : 's'}</span></div></div><div class="surface-body">${state.notificationResult ? `<div class="notice ${state.notificationResult.type}">${esc(state.notificationResult.text)}</div>` : ''}${!subscriberCount ? '<div class="notice warn"><strong>No devices are enrolled yet.</strong> Staff can prepare notices now; delivery begins after signed-in attendees or staff enable Event alerts on their device.</div>' : ''}${adminList(state.announcements, item => { const deliveries = deliveryByAnnouncement(item.id), latest = deliveries[0]; return `<article class="content-record notification-record"><div><div class="notification-record-tags"><span class="status ${item.published ? 'green' : 'amber'}">${item.published ? 'Published' : 'Draft'}</span><span class="status ${item.priority === 'urgent' ? 'red' : item.priority === 'important' ? 'amber' : 'purple'}">${esc(item.priority)}</span><span class="status purple">${esc(audienceLabel(item))}</span></div><h3>${esc(item.title)}</h3><p>${esc(item.body)}</p>${latest ? `<small>Last sent ${esc(formatDate(latest.requested_at))} ${esc(formatTime(latest.requested_at))} · ${Number(latest.delivered_count)} delivered · ${Number(latest.failure_count)} failed</small>` : '<small>Not sent as a browser notification</small>'}</div><button class="btn btn-ghost btn-small" data-edit-content="announcements" data-edit-id="${item.id}">Open</button></article>`; }, 'announcements', canNotify())}${current ? announcementEditor(row || {}) : ''}</div></section>`;
     } else if (state.staffSection === 'programme') {
       const row = current && current !== 'new' ? state.schedule.find(item => item.id === current) : null;
       el.innerHTML = `<section class="surface"><div class="surface-head"><div><strong>Programme and BFBS coverage</strong><div class="small muted">Add YouTube links directly to the relevant programme item.</div></div></div><div class="surface-body">${adminList(state.schedule, item => `<article class="content-record"><div><span class="status ${item.published ? 'green' : 'amber'}">${item.published ? 'Published' : 'Draft'}</span><h3>${esc(item.title)}</h3><p>${esc(formatDate(item.starts_at))} at ${esc(formatTime(item.starts_at))}${item.stream_url ? ' · BFBS link added' : ''}</p></div><button class="btn btn-ghost btn-small" data-edit-content="programme" data-edit-id="${item.id}">Open</button></article>`, 'programme')}${current ? programmeEditor(row || {}) : ''}</div></section>`;
@@ -290,8 +421,51 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
   }
 
   async function saveAnnouncement(event) {
-    event.preventDefault(); const form = event.currentTarget, data = formData(form);
-    await saveRecord(form, 'announcements', { event_id:eventId,title:data.title.trim(),body:data.body.trim(),priority:data.priority,audience:['all'],publish_at:meribelIso(data.publish_at),expires_at:meribelIso(data.expires_at),action_label:data.action_label.trim()||null,action_url:safeUrl(data.action_url)||null,published:!!data.published }, 'Announcement saved');
+    event.preventDefault();
+    const form = event.currentTarget, data = formData(form), action = event.submitter?.dataset.notificationAction || 'save';
+    const existing = state.announcements.find(item => item.id === form.dataset.recordId);
+    if (action === 'send' && existing?.push_sent_at && !window.confirm('Send this notification to the selected audience again?')) return;
+    const buttons = [...form.querySelectorAll('button')], result = form.querySelector('.service-save-result');
+    buttons.forEach(button => { button.disabled = true; });
+    message(result, action === 'send' ? 'Publishing and sending...' : 'Saving...', '');
+    const payload = {
+      event_id: eventId,
+      title: data.title.trim(),
+      body: data.body.trim(),
+      priority: data.priority,
+      audience: [data.audience || 'all'],
+      publish_at: action === 'send' ? new Date().toISOString() : (existing?.publish_at || new Date().toISOString()),
+      expires_at: meribelIso(data.expires_at),
+      action_label: data.action_label.trim() || null,
+      action_url: safeUrl(data.action_url) || null,
+      published: action === 'send' ? true : !!data.published,
+      push_notification: action === 'send',
+    };
+    const response = form.dataset.recordId
+      ? await client.from('announcements').update(payload).eq('id', form.dataset.recordId).select().single()
+      : await client.from('announcements').insert(payload).select().single();
+    if (response.error) {
+      message(result, response.error.message);
+      buttons.forEach(button => { button.disabled = false; });
+      return;
+    }
+    if (action === 'send') {
+      const delivery = await client.functions.invoke('send-push-announcement', { body: { action: 'send', announcement_id: response.data.id } });
+      if (delivery.error) {
+        let detail = delivery.error.message;
+        try { detail = (await delivery.error.context.json()).error || detail; } catch {}
+        state.notificationResult = { type: 'error', text: `The notice was published, but the browser notification could not be sent: ${detail}` };
+      } else {
+        const sent = Number(delivery.data?.delivered || 0), failed = Number(delivery.data?.failed || 0), eligible = Number(delivery.data?.eligible || 0);
+        state.notificationResult = { type: failed ? 'warn' : 'success', text: `Notification completed: ${sent} delivered, ${failed} failed, ${eligible} eligible device${eligible === 1 ? '' : 's'}.` };
+        toast('Notification sent');
+      }
+    } else {
+      state.notificationResult = { type: 'success', text: 'Notification saved without sending.' };
+      toast('Notification saved');
+    }
+    state.selected.announcements = null;
+    await loadNotifications();
   }
   async function saveProgramme(event) {
     event.preventDefault(); const form = event.currentTarget, data = formData(form);
@@ -347,7 +521,8 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     const tables={announcements:'announcements',programme:'schedule_items',venues:'venues',results:'race_results',media:'event_media'};
     const response=await client.from(tables[kind]).delete().eq('id',id);
     if(response.error){toast(response.error.message);return;}
-    toast('Record deleted');state.selected[kind]=null;await loadStaff();
+    toast('Record deleted');state.selected[kind]=null;
+    if(kind==='announcements')await loadNotifications();else await loadStaff();
   }
 
   async function saveTablePlan(event) {
@@ -382,7 +557,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     const results=await Promise.all([
       client.from('transfer_runs').select('*').eq('event_id',eventId).order('departure_at'),
       client.from('transfer_passengers').select('*').order('sort_order'),
-      client.from('attendees').select('id,title_rank,first_name,surname,email,mobile,attendance_status').eq('event_id',eventId).neq('attendance_status','cancelled').order('surname').order('first_name'),
+      client.from('attendees').select('id,title_rank,first_name,surname,email,mobile,attendance_status,record_source').eq('event_id',eventId).neq('attendance_status','cancelled').order('surname').order('first_name'),
     ]);
     const failed=results.find(item=>item.error);const panel=document.querySelector('#transferAdminPanel');
     if(failed){if(panel)message(panel,failed.error.message);return;}
@@ -395,7 +570,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
 
   function transferEditor(run={}) {
     const assigned=new Set(state.passengers.filter(item=>item.transfer_run_id===run.id).map(item=>item.attendee_id));
-    return `<form id="transferRunEditor" class="record-form transfer-editor" data-run-id="${run.id||''}"><div class="form-grid compact-grid"><div class="form-section"><h3>${run.id?'Edit':'New'} transfer</h3><p>Times are entered in local Méribel/Geneva time.</p></div><div class="field"><label>Transfer name *</label><input name="transfer_name" required value="${esc(run.transfer_name||'')}"></div><div class="field"><label>Direction *</label><select name="direction"><option value="arrival"${selected(run.direction,'arrival')}>Arrival</option><option value="departure"${selected(run.direction,'departure')}>Departure</option><option value="local"${selected(run.direction,'local')}>Local movement</option></select></div><div class="field"><label>Departure date and time *</label><input type="datetime-local" name="departure_at" min="2027-01-27T00:00" max="2027-02-09T23:59" required value="${esc(localInput(run.departure_at)||'2027-01-30T12:00')}"></div><div class="field"><label>Status</label><select name="status"><option value="planned"${selected(run.status,'planned')}>Planned</option><option value="confirmed"${selected(run.status,'confirmed')}>Confirmed</option><option value="departed"${selected(run.status,'departed')}>Departed</option><option value="completed"${selected(run.status,'completed')}>Completed</option><option value="cancelled"${selected(run.status,'cancelled')}>Cancelled</option></select></div><div class="field"><label>Pickup *</label><input name="pickup_location" required value="${esc(run.pickup_location||'')}"></div><div class="field"><label>Destination *</label><input name="destination" required value="${esc(run.destination||'')}"></div><div class="field"><label>Service / operator</label><input name="service_type" value="${esc(run.service_type||'')}"></div><div class="field"><label>Vehicle details</label><input name="vehicle_details" value="${esc(run.vehicle_details||'')}"></div><div class="field"><label>Driver name</label><input name="driver_name" value="${esc(run.driver_name||'')}"></div><div class="field"><label>Driver mobile</label><input type="tel" name="driver_mobile" value="${esc(run.driver_mobile||'')}"></div><div class="field"><label>Lead traveller</label><select name="lead_traveller_attendee_id">${options(state.attendees,run.lead_traveller_attendee_id,item=>`${item.title_rank||''} ${item.first_name} ${item.surname}`.trim(),'No linked attendee')}</select></div><div class="field"><label>Capacity</label><input type="number" name="capacity" min="1" max="100" value="${run.capacity||''}"></div><div class="field"><label>Lead traveller name</label><input name="lead_traveller_name" value="${esc(run.lead_traveller_name||'')}"></div><div class="field"><label>Lead traveller mobile</label><input type="tel" name="lead_traveller_mobile" value="${esc(run.lead_traveller_mobile||'')}"></div><div class="field full"><label>Information visible to attendees</label><textarea name="attendee_notes">${esc(run.attendee_notes||'')}</textarea></div><div class="field full"><label>Protocol notes</label><textarea name="protocol_notes">${esc(run.protocol_notes||'')}</textarea></div><div class="field checkbox full"><input id="transferPublished" type="checkbox" name="published"${checked(run.published)}><div><label for="transferPublished">Publish to signed-in attendees</label><small>Driver and lead-traveller contact details and the passenger list will be visible.</small></div></div></div><div class="transfer-passenger-picker"><h4>Passenger manifest</h4><p>Select every attendee travelling on this transfer.</p><div class="passenger-check-grid">${state.attendees.map(item=>`<label><input type="checkbox" name="passenger" value="${item.id}"${checked(assigned.has(item.id))}><span><strong>${esc(`${item.title_rank||''} ${item.first_name} ${item.surname}`.trim())}</strong><small>${esc(item.mobile||item.email||'')}</small></span></label>`).join('')}</div></div><div class="service-actions"><button class="btn btn-primary" type="submit">Save transfer</button>${run.id?`<button class="btn btn-ghost" type="button" data-transfer-document="preview">Preview PDF</button><button class="btn btn-ghost" type="button" data-transfer-document="download">Download PDF</button><button class="btn btn-ghost" type="button" id="deleteTransferRun">Delete</button>`:''}<button class="btn btn-ghost" type="button" id="cancelTransferRun">Cancel</button><div class="service-save-result"></div></div></form>`;
+    return `<form id="transferRunEditor" class="record-form transfer-editor" data-run-id="${run.id||''}"><div class="form-grid compact-grid"><div class="form-section"><h3>${run.id?'Edit':'New'} transfer</h3><p>Times are entered in local Méribel/Geneva time. Use Add person above if someone is not listed.</p></div><div class="field"><label>Transfer name *</label><input name="transfer_name" required value="${esc(run.transfer_name||'')}"></div><div class="field"><label>Direction *</label><select name="direction"><option value="arrival"${selected(run.direction,'arrival')}>Arrival</option><option value="departure"${selected(run.direction,'departure')}>Departure</option><option value="local"${selected(run.direction,'local')}>Local movement</option></select></div><div class="field"><label>Departure date and time *</label><input type="datetime-local" name="departure_at" min="2027-01-27T00:00" max="2027-02-09T23:59" required value="${esc(localInput(run.departure_at)||'2027-01-30T12:00')}"></div><div class="field"><label>Status</label><select name="status"><option value="planned"${selected(run.status,'planned')}>Planned</option><option value="confirmed"${selected(run.status,'confirmed')}>Confirmed</option><option value="departed"${selected(run.status,'departed')}>Departed</option><option value="completed"${selected(run.status,'completed')}>Completed</option><option value="cancelled"${selected(run.status,'cancelled')}>Cancelled</option></select></div><div class="field"><label>Pickup *</label><input name="pickup_location" required value="${esc(run.pickup_location||'')}"></div><div class="field"><label>Destination *</label><input name="destination" required value="${esc(run.destination||'')}"></div><div class="field"><label>Service / operator</label><input name="service_type" value="${esc(run.service_type||'')}"></div><div class="field"><label>Vehicle details</label><input name="vehicle_details" value="${esc(run.vehicle_details||'')}"></div><div class="field"><label>Driver name</label><input name="driver_name" value="${esc(run.driver_name||'')}"></div><div class="field"><label>Driver mobile</label><input type="tel" name="driver_mobile" value="${esc(run.driver_mobile||'')}"></div><div class="field"><label>Lead traveller</label><select name="lead_traveller_attendee_id">${options(state.attendees,run.lead_traveller_attendee_id,item=>`${item.title_rank||''} ${item.first_name} ${item.surname}${item.record_source==='protocol_manual'?' · Protocol entry':''}`.trim(),'No linked person')}</select></div><div class="field"><label>Capacity</label><input type="number" name="capacity" min="1" max="100" value="${run.capacity||''}"></div><div class="field"><label>Lead traveller name</label><input name="lead_traveller_name" value="${esc(run.lead_traveller_name||'')}"></div><div class="field"><label>Lead traveller mobile</label><input type="tel" name="lead_traveller_mobile" value="${esc(run.lead_traveller_mobile||'')}"></div><div class="field full"><label>Information visible to attendees</label><textarea name="attendee_notes">${esc(run.attendee_notes||'')}</textarea></div><div class="field full"><label>Protocol notes</label><textarea name="protocol_notes">${esc(run.protocol_notes||'')}</textarea></div><div class="field checkbox full"><input id="transferPublished" type="checkbox" name="published"${checked(run.published)}><div><label for="transferPublished">Publish to signed-in attendees</label><small>Driver and lead-traveller contact details and the passenger list will be visible.</small></div></div></div><div class="transfer-passenger-picker"><h4>Passenger manifest</h4><p>Select every person travelling on this transfer.</p><div class="passenger-check-grid">${state.attendees.map(item=>`<label><input type="checkbox" name="passenger" value="${item.id}"${checked(assigned.has(item.id))}><span><strong>${esc(`${item.title_rank||''} ${item.first_name} ${item.surname}`.trim())}</strong><small>${esc([item.mobile||item.email,item.record_source==='protocol_manual'?'Protocol entry':''].filter(Boolean).join(' · '))}</small></span></label>`).join('')}</div></div><div class="service-actions"><button class="btn btn-primary" type="submit">Save transfer</button>${run.id?`<button class="btn btn-ghost" type="button" data-transfer-document="preview">Preview PDF</button><button class="btn btn-ghost" type="button" data-transfer-document="download">Download PDF</button><button class="btn btn-ghost" type="button" id="deleteTransferRun">Delete</button>`:''}<button class="btn btn-ghost" type="button" id="cancelTransferRun">Cancel</button><div class="service-save-result"></div></div></form>`;
   }
 
   function renderTransferAdmin() {
@@ -441,5 +616,5 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     setTimeout(()=>URL.revokeObjectURL(url),60000);button.disabled=false;button.textContent=original;
   }
 
-  return { publicMarkup, bindPublic, loadPublic, staffMarkup, bindStaff, loadStaff, protocolMarkup, bindProtocol, loadTransfers };
+  return { publicMarkup, bindPublic, loadPublic, staffMarkup, bindStaff, loadStaff, notificationMarkup, loadNotifications, protocolMarkup, bindProtocol, loadTransfers };
 }
