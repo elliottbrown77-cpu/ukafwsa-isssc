@@ -9,24 +9,22 @@ const TRAVEL_DATE_START = '2027-01-27';
 const TRAVEL_DATE_END = '2027-02-09';
 const EVENT_DATE_START = '2027-01-30';
 const EVENT_DATE_END = '2027-02-06';
-const ATTENDEE_CATEGORIES = ['Winter Sports Ambassador','Military Guest','Sponsor','Sponsor Guest','Royal Party','Proton','Committee','Committee Guest','Protocol','Protocol Intern','Hill Team','Other'];
+const ATTENDEE_CATEGORIES = ['Sponsor','Sponsor Guest','Winter Sports Ambassador','Military Guest','Committee','Committee Guest','Hill Team','Protocol','Protocol Intern'];
 const SPONSOR_CATEGORIES = new Set(['Sponsor','Sponsor Guest']);
+const GUEST_CATEGORIES = new Set(['Sponsor Guest','Military Guest','Committee Guest']);
 const DISCIPLINE_CATEGORIES = new Set(['Hill Team']);
 const SERVICE_CATEGORIES = new Set(['Winter Sports Ambassador','Committee']);
 const PREARRANGED_ACCOMMODATION_CATEGORIES = new Set(['Protocol','Protocol Intern','Hill Team']);
 const REGISTRATION_CATEGORY_OPTIONS = [
  ['Sponsor','Sponsor Representative'],
  ['Sponsor Guest',"Sponsor Representative's Guest (spouse/partner/dependant, etc.)"],
- ['Winter Sports Ambassador','Winter Sports Ambassador'],
- ['Military Guest',"Winter Sports Ambassador's Guest (spouse/partner/dependant)"],
+ ['Winter Sports Ambassador','Military Ambassador'],
+ ['Military Guest',"Military Ambassador's Guest (spouse/partner/dependant)"],
  ['Committee','UKAFWSA Committee'],
  ['Committee Guest',"UKAFWSA Committee's Guest (spouse/partner/dependant, etc.)"],
- ['Hill Team','Hill Team / Race Committee'],
+ ['Hill Team','Hill Team/Race Committee'],
  ['Protocol','Core Protocol'],
- ['Protocol Intern','Protocol Intern'],
- ['Proton','Proton'],
- ['Royal Party','Royal Party'],
- ['Other','Other']
+ ['Protocol Intern','Protocol Intern (“Proton”)']
 ];
 const ARRIVAL_TRANSFER_OPTIONS = [
  'Not required',
@@ -53,7 +51,7 @@ const LESSON_TYPES = [
  'Snowboard / Private lesson / Basic level','Snowboard / Private lesson / Intermediate level',
  'Snowboard / Group lesson / Basic level','Snowboard / Group lesson / Intermediate level'
 ];
-const LESSON_DATES = ['2027-01-30','2027-01-31','2027-02-01','2027-02-02','2027-02-03','2027-02-04','2027-02-05'];
+const LESSON_DATES = ['2027-01-31','2027-02-01','2027-02-02','2027-02-03','2027-02-04','2027-02-05'];
 let supabase = null;
 let eventFeature = null;
 let roomAllocator = null;
@@ -129,7 +127,7 @@ const SKI_END_OPTIONS = [
  ['2027-02-03','Wed 3 Feb 27'],['2027-02-04','Thu 4 Feb 27'],['2027-02-05','Fri 5 Feb 27']
 ];
 function register(){
-return `<div class="hero-mini"><span class="eyebrow">Attendance request</span><h2>ISSSC 2027 registration</h2><p>Your answers are a request. Protocol confirms accommodation, transfers, lift passes and chargeable services before billing.</p></div>
+return `<div class="hero-mini"><span class="eyebrow">Attendance request</span><h2>ISSSC 2027 registration</h2><p>Please note: each attendee must complete a separate registration form, including guests, spouses, and dependants.</p></div>
 <div class="surface"><div class="surface-head"><div><strong>Attendance details</strong><div class="muted small">30 January–6 February 2027 · Méribel</div></div><span class="status purple">Secure web form</span></div><div class="surface-body">
 <form id="registrationForm" class="form-grid">
 <div class="field full hidden"><label>Website</label><input name="website" autocomplete="off" tabindex="-1"></div>
@@ -138,23 +136,26 @@ return `<div class="hero-mini"><span class="eyebrow">Attendance request</span><h
 <div class="field proxy hidden"><label>Your surname *</label><input name="proxy_surname" disabled></div><div class="field proxy hidden"><label>Your email *</label><input type="email" name="proxy_email" disabled></div>
 <div class="form-section"><h3>Attendee</h3><p>Who is attending ISSSC 2027?</p></div>
 <div class="field"><label>Category *</label><select name="category" required>${registrationCategoryOptions(state.registrationInvitation?.category||'')}</select></div>
-<div class="field hidden" id="sponsorOrganisationField"><label>Sponsor / organisation *</label><select name="sponsor_name" disabled>${registrationSponsorOptions(state.registrationInvitation?.sponsor_name||'')}</select><small>This list is managed by the Sponsor team in the staff site.</small></div>
-<div class="field"><label>Rank / title *</label><input name="title_rank" required placeholder="e.g. AVM, Lt Gen, VAdm, Mr or Mrs"></div><div class="field"><label>Role / appointment *</label><input name="role" required placeholder="e.g. CEO, Director, Guest or Race Committee"></div>
+<div class="field hidden" id="sponsorOrganisationField"><label>Sponsor *</label><select name="sponsor_name" disabled>${registrationSponsorOptions(state.registrationInvitation?.sponsor_name||'')}</select><small>This list is managed by the Sponsor team in the staff site.</small></div>
+<div class="field hidden" id="sponsorOtherField"><label>Other sponsor *</label><input name="sponsor_other" disabled placeholder="Enter the sponsor name"></div>
+<div class="field"><label>Rank / title *</label><input name="title_rank" required placeholder="e.g. AVM, Lt Gen, VAdm, Mr or Mrs"></div><div class="field"><label>Role/Job Title/Appointment/Position *</label><input name="role" required placeholder="e.g. CEO, Director or Race Committee"></div>
 <div class="field"><label>First name *</label><input name="first_name" required></div><div class="field"><label>Surname *</label><input name="surname" required></div>
 <div class="field"><label>Post nominals</label><input name="post_nominals"></div><div class="field"><label>Email *</label><input type="email" name="email" required></div>
 <div class="field"><label>Mobile number *</label><input name="mobile" inputmode="tel" required placeholder="07777 123456 or +44 7777 123456"></div><div class="field hidden" id="serviceField"><label>Service *</label><select name="service" disabled>${opts(['Army','Navy','RAF','Civil Service','Other'],'Please select…')}</select></div>
-<div class="field hidden" id="disciplineField"><label>Discipline *</label><select name="discipline" disabled>${opts(['Alpine','Snowboard','Telemark','Other'],'Please select…')}</select><small>Required for Hill Team / Race Committee attendees.</small></div>
-<div class="form-section"><h3>Accommodation</h3><p>Hotel choice is a preference only. Protocol will record the assigned hotel and room separately.</p></div>
-<div class="field checkbox" id="accommodationRequiredField"><input type="checkbox" name="accommodation_required" id="acc"><div><label for="acc">I require accommodation</label><small id="prearrangedAccommodationNote" class="hidden">Accommodation is arranged for this category; enter the required dates below.</small></div></div>
-<div class="notice accommodation-detail full hidden" id="packageDates"><strong>Available packages</strong><br>Full week: Sat 30 Jan–Sat 6 Feb · First half: Sat 30 Jan–Wed 3 Feb · Second half: Wed 3–Sat 6 Feb.</div>
-<div class="field accommodation-detail hidden" id="hotelPreferenceField"><label>Hotel preference *</label><select name="hotel_preference" disabled></select><small>First come, first served; this is not a guaranteed allocation. Chalet is available only to the Proton category.</small></div>
-<div class="field accommodation-detail hidden"><label>Accommodation from *</label><select name="accommodation_from" disabled>${datedOptions(ACCOMMODATION_START_OPTIONS)}</select><small id="sponsorDateNote" class="hidden">Sponsor arrivals are limited to Saturday 30 January or Wednesday 3 February.</small></div><div class="field accommodation-detail hidden"><label>Accommodation to *</label><select name="accommodation_to" disabled>${datedOptions(ACCOMMODATION_END_OPTIONS)}</select></div>
-<div class="notice warn accommodation-detail full hidden" id="accommodationChargingNote">Dates outside the three standard packages may be charged at the full applicable half-week or full-week rate and must be agreed in advance.</div>
+<div class="field hidden" id="serviceOtherField"><label>Other service *</label><input name="service_other" disabled placeholder="Enter the service"></div>
+<div class="field hidden" id="disciplineField"><label>Discipline *</label><select name="discipline" disabled>${opts(['Alpine','Snowboard','Telemark','Other'],'Please select…')}</select><small>Required for Hill Team/Race Committee attendees.</small></div>
+<div class="field hidden" id="disciplineOtherField"><label>Other discipline *</label><input name="discipline_other" disabled placeholder="Enter the discipline"></div>
+<div class="form-section"><h3>Accommodation</h3><p>Accommodation dates are a request. Protocol will record the assigned hotel and room separately.</p></div>
+<div class="field checkbox" id="accommodationRequiredField"><input type="checkbox" name="accommodation_required" id="acc"><div><label for="acc">I require accommodation</label><small id="prearrangedAccommodationNote" class="fixed-note-text hidden">Accommodation is arranged for this category; enter the required dates below.</small></div></div>
+<div class="notice fixed-note accommodation-detail full hidden" id="packageDates"><strong>Available packages</strong><br>Full week: Sat 30 Jan–Sat 6 Feb · First half: Sat 30 Jan–Wed 3 Feb · Second half: Wed 3–Sat 6 Feb.</div>
+<div class="field accommodation-detail hidden" id="hotelPreferenceField"><label>Hotel preference *</label><select name="hotel_preference" disabled></select><small>First come, first served; this is not a guaranteed allocation.</small></div>
+<div class="field accommodation-detail hidden"><label>Accommodation from *</label><select name="accommodation_from" disabled>${datedOptions(ACCOMMODATION_START_OPTIONS)}</select><small id="sponsorDateNote" class="fixed-note-text hidden">Sponsor arrivals are limited to Saturday 30 January or Wednesday 3 February.</small></div><div class="field accommodation-detail hidden"><label>Accommodation to *</label><select name="accommodation_to" disabled>${datedOptions(ACCOMMODATION_END_OPTIONS)}</select><small id="sponsorDepartureNote" class="fixed-note-text hidden">Sponsor departures are limited to Wednesday 3 February or Saturday 6 February.</small></div>
+<div class="notice fixed-note accommodation-detail full hidden" id="accommodationChargingNote">Dates outside the three standard packages may be charged at the full applicable half-week or full-week rate and must be agreed in advance.</div>
 <div class="field checkbox accommodation-detail hidden" id="roomShareField"><input type="checkbox" name="share_room" id="share" disabled><label for="share">This attendee will share a room</label></div>
 <div class="field sharing-detail hidden"><label>Who with? *</label><input name="sharing_with" disabled placeholder="Name of the person sharing"></div><div class="field sharing-detail hidden"><label>Room sharing option *</label><select name="room_sharing_option" disabled>${opts(['Double room','Twin room'],'Please select…')}</select></div>
-<div class="field hidden" id="dinnerField"><label>Evening meals *</label><select name="dinners_required" disabled>${opts(['Dinner with event guests each night','B&B only / no event dinner'],'Please select…')}</select><small id="sponsorDinnerNote" class="hidden">Dinner with event guests is included for sponsors and sponsor guests.</small></div><div class="field hidden" id="dietaryField"><label>Dietary requirements</label><textarea name="dietary_requirements" disabled placeholder="e.g. gluten free or vegetarian"></textarea></div>
+<div class="field hidden" id="dinnerField"><label>Evening meals *</label><select name="dinners_required" disabled>${opts(['Dinner with event guests each night','B&B only / no event dinner'],'Please select…')}</select><small id="sponsorDinnerNote" class="fixed-note-text hidden">Dinner with event guests is included for sponsors and sponsor guests.</small></div><div class="field hidden" id="dietaryField"><label>Dietary requirements</label><textarea name="dietary_requirements" disabled placeholder="e.g. gluten free or vegetarian"></textarea></div>
 <div class="form-section"><h3>Arrival</h3><p>Travel details help Protocol coordinate transfers.</p></div>
-<div class="notice warn full">Travel outside the scheduled UKAFWSA dates and times is the traveller's responsibility. UKAFWSA will not arrange or fund transport outside scheduled transfers.</div>
+<div class="notice fixed-note full">Travel outside the scheduled UKAFWSA dates and times is the traveller's responsibility. UKAFWSA will not arrange or fund transport outside scheduled transfers.</div>
 <div class="field"><label>Method of transport *</label><select name="arrival_method" required>${opts(['Flight','Self Drive','Other'],'Please select…')}</select></div>
 <div class="field hidden" id="arrivalOtherField"><label>Other arrival method *</label><input name="arrival_method_other" disabled placeholder="Describe how you are travelling"></div>
 <div class="field arrival-flight-detail hidden"><label>Arrival airport *</label><select name="arrival_airport_station" disabled>${opts(['GVA','Other'],'Please select…')}</select></div><div class="field hidden" id="arrivalAirportOtherField"><label>Other arrival airport *</label><input name="arrival_airport_other" disabled></div>
@@ -163,7 +164,7 @@ return `<div class="hero-mini"><span class="eyebrow">Attendance request</span><h
 ${dateTimeField('arrival_special_transfer_datetime','Date and time of special arrival transfer','',' disabled','arrival-special-detail hidden')}
 ${dateTimeField('arrival_resort_datetime','Expected arrival date and time in Méribel','',' disabled','arrival-resort-detail hidden')}
 <div class="form-section"><h3>Departure</h3><p>Enter the scheduled flight, train, coach or road departure. Protocol will confirm any resort pickup time.</p></div>
-<div class="notice warn full">Travel outside the scheduled UKAFWSA dates and times is the traveller's responsibility. UKAFWSA will not arrange or fund transport outside scheduled transfers.</div>
+<div class="notice fixed-note full">Travel outside the scheduled UKAFWSA dates and times is the traveller's responsibility. UKAFWSA will not arrange or fund transport outside scheduled transfers.</div>
 <div class="field"><label>Method of transport *</label><select name="departure_method" required>${opts(['Flight','Self Drive','Other'],'Please select…')}</select></div>
 <div class="field hidden" id="departureOtherField"><label>Other departure method *</label><input name="departure_method_other" disabled placeholder="Describe how you are travelling"></div>
 <div class="field departure-flight-detail hidden"><label>Departure airport *</label><select name="departure_airport_station" disabled>${opts(['GVA','Other'],'Please select…')}</select></div><div class="field hidden" id="departureAirportOtherField"><label>Other departure airport *</label><input name="departure_airport_other" disabled></div>
@@ -172,16 +173,16 @@ ${dateTimeField('arrival_resort_datetime','Expected arrival date and time in Mé
 ${dateTimeField('departure_special_transfer_datetime','Date and time of special departure transfer','',' disabled','departure-special-detail hidden')}
 ${dateTimeField('departure_resort_datetime','Departure date and time from Méribel','',' disabled','departure-resort-detail hidden')}
 <div class="form-section"><h3>On snow</h3></div>
-<div class="notice full">UKAFWSA provides full-day 3 Vallées passes. Pedestrian and half-day passes must be purchased independently.</div>
+<div class="notice fixed-note full">UKAFWSA provides full-day 3 Vallées passes. Pedestrian and half-day passes must be purchased independently.</div>
 <div class="field checkbox" id="liftPassField"><input type="checkbox" name="lift_pass_required" id="lift"><label for="lift">I require a 3 Vallées lift pass</label></div><div class="notice hidden" id="carreIncluded"><strong>Carre Neige included.</strong> It is automatically added to every event lift pass and cannot be removed.</div>
 <div class="field lift-detail hidden"><label>First day skiing *</label><select name="first_ski_day" disabled>${datedOptions(SKI_START_OPTIONS)}</select><small>Usually the day after arrival.</small></div><div class="field lift-detail hidden"><label>Last day skiing *</label><select name="last_ski_day" disabled>${datedOptions(SKI_END_OPTIONS)}</select><small>Usually the day before departure.</small></div>
 <div class="field lift-detail hidden"><label>Date of birth *</label><input type="date" name="date_of_birth" disabled><small>Required only to arrange Carre Neige with the lift pass.</small></div>
-<div class="field checkbox" id="lessonsField"><input type="checkbox" name="lessons_required" id="lessons"><label for="lessons">I require skiing or snowboarding lessons</label></div>
+<div class="field checkbox full" id="lessonsField"><input type="checkbox" name="lessons_required" id="lessons"><label for="lessons">I require skiing or snowboarding lessons</label></div>
 <div class="field lesson-detail hidden"><label>Lesson type *</label><select name="lesson_type" disabled>${opts(LESSON_TYPES,'Please select…')}</select><small>Group lessons: £115.50 per person per lesson. Private lessons: £240 per lesson.</small></div>
 <fieldset class="field lesson-detail full hidden" id="lessonDatesField"><legend>Lesson dates *</legend><div class="choice-grid">${LESSON_DATES.map(date=>`<label><input type="checkbox" name="lesson_date" value="${date}" disabled><span>${esc(displayEventDate(date))}</span></label>`).join('')}</div></fieldset>
 <div class="field checkbox"><input type="checkbox" name="equipment_hire_required" id="hire"><div><label for="hire">I require ski, snowboard or equipment hire</label><small>This records the requirement only. Protocol will coordinate any information needed later.</small></div></div>
 <div class="field full"><label>Anything else Protocol should know?</label><textarea name="other_information"></textarea></div>
-<div class="field full"><div class="notice warn">Submitting this form does not create a final bill. Protocol confirms what was actually supplied; Finance calculates charges from the approved event rate card.</div></div>
+<div class="field full"><div class="notice fixed-note">Submitting this form does not create a final bill.</div></div>
 <div class="field checkbox full"><input type="checkbox" required name="privacy_acknowledged" id="privacyAcknowledged"><div><label for="privacyAcknowledged">I have read the <a href="/privacy.html" target="_blank" rel="noopener">privacy notice</a> *</label><small>Your information is used to administer attendance, accommodation, travel, lift passes, safety and billing for ISSSC 2027.</small></div></div>
 <div class="field full"><button class="btn btn-primary" type="submit" id="submitRegistration">Submit attendance request</button><div id="formResult"></div></div>
 </form></div></div>`;
@@ -246,7 +247,7 @@ function bind(){
   const ob=document.querySelector('#onBehalf');if(ob) ob.onchange=applyRegistrationRules;
   const reg=document.querySelector('#registrationForm');if(reg){
    reg.addEventListener('submit',submitRegistration);reg.addEventListener('invalid',registrationInvalid,true);
-   ['category','accommodation_required','share_room','dinners_required','arrival_method','arrival_airport_station','arrival_transfer_option','departure_method','departure_airport_station','departure_transfer_option','lift_pass_required','lessons_required'].forEach(name=>{if(reg.elements[name])reg.elements[name].onchange=applyRegistrationRules;});
+   ['category','sponsor_name','service','discipline','accommodation_required','share_room','dinners_required','arrival_method','arrival_airport_station','arrival_transfer_option','departure_method','departure_airport_station','departure_transfer_option','lift_pass_required','lessons_required'].forEach(name=>{if(reg.elements[name])reg.elements[name].onchange=applyRegistrationRules;});
    applyRegistrationRules();
   }
   const login=document.querySelector('#loginForm');if(login) login.addEventListener('submit',sendLoginLink);
@@ -292,7 +293,11 @@ function registrationSponsorOptions(current=''){
  if(!state.registrationContextLoaded)return '<option value="">Loading sponsor list…</option>';
  const items=[...state.registrationSponsors];
  if(current&&!items.some(item=>item.sponsor_name===current))items.unshift({sponsor_name:current});
- return `<option value="">${items.length?'Select sponsor…':'No confirmed sponsors available'}</option>${items.map(item=>`<option value="${esc(item.sponsor_name)}" ${item.sponsor_name===current?'selected':''}>${esc(item.sponsor_name)}</option>`).join('')}`;
+ if(!items.some(item=>item.sponsor_name==='Other'))items.push({sponsor_name:'Other'});
+ return `<option value="">${items.length>1?'Select sponsor…':'No confirmed sponsors available'}</option>${items.map(item=>`<option value="${esc(item.sponsor_name)}" ${item.sponsor_name===current?'selected':''}>${item.sponsor_name==='Other'?'Other (please specify)':esc(item.sponsor_name)}</option>`).join('')}`;
+}
+function normaliseRegistrationCategory(value=''){
+ return ({'Military VIP':'Winter Sports Ambassador','Military Ambassador':'Winter Sports Ambassador','Proton':'Protocol Intern','Sponsor Representative':'Sponsor',"Sponsor Representative's Guest":'Sponsor Guest'})[value]||value;
 }
 async function loadRegistrationContext(){
  if(!supabase||state.registrationContextLoaded||state.registrationContextLoading)return;
@@ -309,31 +314,38 @@ async function loadRegistrationContext(){
  const sponsor=form.elements.sponsor_name,current=state.registrationInvitation?.sponsor_name||sponsor.value;
  sponsor.innerHTML=registrationSponsorOptions(current);sponsor.value=current||'';
  if(state.registrationInvitation){
-  form.elements.category.value=state.registrationInvitation.category==='Military VIP'?'Winter Sports Ambassador':(state.registrationInvitation.category||'Sponsor Guest');
+  form.elements.category.value=normaliseRegistrationCategory(state.registrationInvitation.category||'Sponsor Guest');
   if(!form.elements.email.value)form.elements.email.value=state.registrationInvitation.invitee_email||'';
  }
  applyRegistrationRules();
 }
 function applyRegistrationRules(){
  const form=document.querySelector('#registrationForm');if(!form)return;
- const category=form.elements.category.value,isSponsor=SPONSOR_CATEGORIES.has(category),hasDiscipline=DISCIPLINE_CATEGORIES.has(category),showService=SERVICE_CATEGORIES.has(category),prearranged=PREARRANGED_ACCOMMODATION_CATEGORIES.has(category);
+ const category=form.elements.category.value,isSponsor=SPONSOR_CATEGORIES.has(category),isSponsorRepresentative=category==='Sponsor',isGuest=GUEST_CATEGORIES.has(category),hasDiscipline=DISCIPLINE_CATEGORIES.has(category),showService=SERVICE_CATEGORIES.has(category),prearranged=PREARRANGED_ACCOMMODATION_CATEGORIES.has(category);
  form.elements.category.disabled=!!state.registrationInvitation;form.elements.email.readOnly=!!state.registrationInvitation;
  const proxy=form.elements.submitted_on_behalf.checked;document.querySelectorAll('.proxy').forEach(field=>field.classList.toggle('hidden',!proxy));['proxy_title_rank','proxy_first_name','proxy_surname','proxy_email'].forEach(name=>{const control=form.elements[name];control.disabled=!proxy;control.required=proxy;if(!proxy)control.value='';});
+ const role=form.elements.role;if(isGuest){if(role.dataset.guestPrefilled!=='true')role.dataset.previousValue=role.value;role.value='Guest';role.readOnly=true;role.dataset.guestPrefilled='true';}else{role.readOnly=false;if(role.dataset.guestPrefilled==='true'){role.value=role.dataset.previousValue||'';delete role.dataset.guestPrefilled;delete role.dataset.previousValue;}}
  const discipline=document.querySelector('#disciplineField');discipline.classList.toggle('hidden',!hasDiscipline);form.elements.discipline.disabled=!hasDiscipline;form.elements.discipline.required=hasDiscipline;if(!hasDiscipline)form.elements.discipline.value='';
+ const disciplineOther=hasDiscipline&&form.elements.discipline.value==='Other';document.querySelector('#disciplineOtherField').classList.toggle('hidden',!disciplineOther);form.elements.discipline_other.disabled=!disciplineOther;form.elements.discipline_other.required=disciplineOther;if(!disciplineOther)form.elements.discipline_other.value='';
  const service=document.querySelector('#serviceField');service.classList.toggle('hidden',!showService);form.elements.service.disabled=!showService;form.elements.service.required=showService;if(!showService)form.elements.service.value='';
- const sponsorField=document.querySelector('#sponsorOrganisationField');sponsorField.classList.toggle('hidden',!isSponsor);form.elements.sponsor_name.disabled=!isSponsor||!state.registrationContextLoaded||!!state.registrationInvitation;form.elements.sponsor_name.required=isSponsor&&!state.registrationInvitation;
- if(!isSponsor&&!state.registrationInvitation)form.elements.sponsor_name.value='';
+ const serviceOther=showService&&form.elements.service.value==='Other';document.querySelector('#serviceOtherField').classList.toggle('hidden',!serviceOther);form.elements.service_other.disabled=!serviceOther;form.elements.service_other.required=serviceOther;if(!serviceOther)form.elements.service_other.value='';
+ const sponsorField=document.querySelector('#sponsorOrganisationField');sponsorField.classList.toggle('hidden',!isSponsorRepresentative);form.elements.sponsor_name.disabled=!isSponsorRepresentative||!state.registrationContextLoaded||!!state.registrationInvitation;form.elements.sponsor_name.required=isSponsorRepresentative&&!state.registrationInvitation;
+ const sponsorOther=isSponsorRepresentative&&!state.registrationInvitation&&form.elements.sponsor_name.value==='Other';document.querySelector('#sponsorOtherField').classList.toggle('hidden',!sponsorOther);form.elements.sponsor_other.disabled=!sponsorOther;form.elements.sponsor_other.required=sponsorOther;if(!sponsorOther)form.elements.sponsor_other.value='';
+ if(!isSponsorRepresentative&&!state.registrationInvitation)form.elements.sponsor_name.value='';
  const accommodationField=document.querySelector('#accommodationRequiredField');form.elements.accommodation_required.disabled=prearranged;accommodationField.classList.toggle('prearranged-choice',prearranged);document.querySelector('#prearrangedAccommodationNote').classList.toggle('hidden',!prearranged);if(prearranged)form.elements.accommodation_required.checked=true;
  const needsRoom=form.elements.accommodation_required.checked;
- const hotel=form.elements.hotel_preference,hotelCurrent=hotel.value,hotels=category==='Proton'?[['Eterlou',"L'Eterlou"],['Chaudanne','La Chaudanne'],['Savoy','Le Savoy'],['Chalet','Chalet'],['No preference','No preference']]:[['Eterlou',"L'Eterlou"],['Chaudanne','La Chaudanne'],['Savoy','Le Savoy'],['No preference','No preference']];
+ const hotel=form.elements.hotel_preference,hotelCurrent=hotel.value,hotels=[['Eterlou',"L'Eterlou"],['Chaudanne','La Chaudanne'],['Savoy','Le Savoy'],['No preference','No preference']];
  hotel.innerHTML=pairedOptions(hotels,hotelCurrent,'Please select…');if(hotels.some(([value])=>value===hotelCurrent))hotel.value=hotelCurrent;
  document.querySelectorAll('.accommodation-detail').forEach(field=>field.classList.toggle('hidden',!needsRoom));
  document.querySelectorAll('.accommodation-detail input,.accommodation-detail select').forEach(control=>control.disabled=!needsRoom);
  const from=form.elements.accommodation_from,fromCurrent=from.value,availableStarts=prearranged?ACCOMMODATION_START_OPTIONS:(isSponsor?ACCOMMODATION_START_OPTIONS.filter(([value])=>['2027-01-30','2027-02-03'].includes(value)):ACCOMMODATION_START_OPTIONS.filter(([value])=>value>='2027-01-30'));
  from.innerHTML=datedOptions(availableStarts,fromCurrent);if([...from.options].some(option=>option.value===fromCurrent))from.value=fromCurrent;
+ const to=form.elements.accommodation_to,toCurrent=to.value,availableEnds=isSponsor?ACCOMMODATION_END_OPTIONS.filter(([value])=>['2027-02-03','2027-02-06'].includes(value)):ACCOMMODATION_END_OPTIONS;
+ to.innerHTML=datedOptions(availableEnds,toCurrent);if([...to.options].some(option=>option.value===toCurrent))to.value=toCurrent;
  form.elements.accommodation_from.required=needsRoom;form.elements.accommodation_to.required=needsRoom;
- const showHotel=needsRoom&&!prearranged;document.querySelector('#hotelPreferenceField').classList.toggle('hidden',!showHotel);hotel.disabled=!showHotel;hotel.required=showHotel;if(!showHotel)hotel.value='';
+ const showHotel=needsRoom&&isSponsor;document.querySelector('#hotelPreferenceField').classList.toggle('hidden',!showHotel);hotel.disabled=!showHotel;hotel.required=showHotel;if(!showHotel)hotel.value='';
  document.querySelector('#sponsorDateNote').classList.toggle('hidden',!isSponsor);
+ document.querySelector('#sponsorDepartureNote').classList.toggle('hidden',!isSponsor);
  const allowShare=needsRoom&&!prearranged;document.querySelector('#roomShareField').classList.toggle('hidden',!allowShare);form.elements.share_room.disabled=!allowShare;if(!allowShare)form.elements.share_room.checked=false;
  const sharing=allowShare&&form.elements.share_room.checked;document.querySelectorAll('.sharing-detail').forEach(field=>field.classList.toggle('hidden',!sharing));['sharing_with','room_sharing_option'].forEach(name=>{const control=form.elements[name];control.disabled=!sharing;control.required=sharing;if(!sharing)control.value='';});
  const dinner=form.elements.dinners_required,showDinner=needsRoom&&!prearranged;document.querySelector('#dinnerField').classList.toggle('hidden',!showDinner);dinner.disabled=!showDinner||isSponsor;dinner.required=showDinner&&!isSponsor;document.querySelector('#sponsorDinnerNote').classList.toggle('hidden',!(needsRoom&&isSponsor));if(needsRoom&&isSponsor)dinner.value='Dinner with event guests each night';else if(!showDinner)dinner.value='';
@@ -362,11 +374,15 @@ function registrationError(message,field){
  if(field){field.focus();field.scrollIntoView({behavior:'smooth',block:'center'});}return false;
 }
 function validateRegistration(form,body){
+ if(body.category==='Sponsor'&&body.sponsor_name==='Other'&&!String(body.sponsor_other||'').trim())return registrationError('Enter the sponsor name.',form.elements.sponsor_other);
+ if(SERVICE_CATEGORIES.has(body.category)&&body.service==='Other'&&!String(body.service_other||'').trim())return registrationError('Enter the attendee service.',form.elements.service_other);
+ if(DISCIPLINE_CATEGORIES.has(body.category)&&body.discipline==='Other'&&!String(body.discipline_other||'').trim())return registrationError('Enter the Hill Team or Race Committee discipline.',form.elements.discipline_other);
  if(body.accommodation_required){
   if(!body.accommodation_from)return registrationError('Choose the date accommodation is required from.',form.elements.accommodation_from);
   if(!body.accommodation_to)return registrationError('Choose the date accommodation is required to.',form.elements.accommodation_to);
   if(body.accommodation_to<=body.accommodation_from)return registrationError('Accommodation end date must be after the start date.',form.elements.accommodation_to);
   if(SPONSOR_CATEGORIES.has(body.category)&&!['2027-01-30','2027-02-03'].includes(body.accommodation_from))return registrationError('Sponsors can start accommodation only on Saturday 30 January or Wednesday 3 February.',form.elements.accommodation_from);
+  if(SPONSOR_CATEGORIES.has(body.category)&&!['2027-02-03','2027-02-06'].includes(body.accommodation_to))return registrationError('Sponsor departures are limited to Wednesday 3 February or Saturday 6 February.',form.elements.accommodation_to);
   if(body.accommodation_from==='2027-01-28'&&!['Protocol','Protocol Intern'].includes(body.category))return registrationError('Thursday 28 January accommodation is available only to Protocol.',form.elements.accommodation_from);
   if(body.accommodation_from==='2027-01-29'&&!['Protocol','Protocol Intern','Hill Team'].includes(body.category))return registrationError('Friday 29 January accommodation is available only to Protocol and the Hill Team / Race Committee.',form.elements.accommodation_from);
   if(body.share_room&&(!body.sharing_with||!body.room_sharing_option))return registrationError('Enter who the attendee will share with and choose double or twin room.',!body.sharing_with?form.elements.sharing_with:form.elements.room_sharing_option);
@@ -381,7 +397,7 @@ function validateRegistration(form,body){
 async function submitRegistration(e){
  e.preventDefault();const form=e.currentTarget;const btn=document.querySelector('#submitRegistration');const result=document.querySelector('#formResult');
  if(!supabase){result.innerHTML='<div class="notice error">The secure registration service is still connecting. Please wait a moment and try again.</div>';return}
- const body=formObject(form);body.lesson_dates=[...form.querySelectorAll('[name="lesson_date"]:checked')].map(input=>input.value);delete body.lesson_date;if(state.registrationInvitation){body.category=state.registrationInvitation.category==='Military VIP'?'Winter Sports Ambassador':state.registrationInvitation.category;body.sponsor_name=state.registrationInvitation.sponsor_name;}if(body.website){form.reset();result.innerHTML='<div class="notice success">Thank you.</div>';return}
+ const body=formObject(form);body.lesson_dates=[...form.querySelectorAll('[name="lesson_date"]:checked')].map(input=>input.value);delete body.lesson_date;if(state.registrationInvitation){body.category=normaliseRegistrationCategory(state.registrationInvitation.category);body.sponsor_name=state.registrationInvitation.sponsor_name;}if(body.website){form.reset();result.innerHTML='<div class="notice success">Thank you.</div>';return}
  if(!validateRegistration(form,body))return;
  const registrationDateTimes=[];['arrival','departure'].forEach(direction=>{if(body[`${direction}_method`]==='Flight')registrationDateTimes.push([`${direction}_datetime`,`${direction} flight`]);else registrationDateTimes.push([`${direction}_resort_datetime`,`${direction} in Méribel`]);if(String(body[`${direction}_transfer_option`]||'').startsWith(SPECIAL_TRANSFER_PREFIX))registrationDateTimes.push([`${direction}_special_transfer_datetime`,`${direction} special transfer`]);});
  const incomplete=registrationDateTimes.find(([name])=>incompleteDateTime(body,name));
@@ -389,10 +405,13 @@ async function submitRegistration(e){
  registrationDateTimes.forEach(([name])=>{body[name]=joinedDateTime(body,name);delete body[`${name}_date`];delete body[`${name}_time`];});
  ['arrival','departure'].forEach(direction=>{const flight=body[`${direction}_method`]==='Flight';if(flight){if(body[`${direction}_airport_station`]==='Other')body[`${direction}_airport_station`]=body[`${direction}_airport_other`];body[`${direction}_resort_datetime`]=null;body[`${direction}_transfer`]=!!body[`${direction}_transfer_option`]&&body[`${direction}_transfer_option`]!=='Not required';}else{body[`${direction}_airport_station`]=null;body[`${direction}_number`]=null;body[`${direction}_datetime`]=null;body[`${direction}_transfer`]=false;body[`${direction}_transfer_option`]='Not required';body[`${direction}_special_transfer_datetime`]=null;}delete body[`${direction}_airport_other`];});
  body.carre_neige_required=!!body.lift_pass_required;body.boot_size=null;
- if(!DISCIPLINE_CATEGORIES.has(body.category))body.discipline=null;
- if(!SERVICE_CATEGORIES.has(body.category))body.service=null;
+ if(GUEST_CATEGORIES.has(body.category))body.role='Guest';
+ if(body.category==='Sponsor'&&body.sponsor_name==='Other')body.sponsor_name='Other';else body.sponsor_other=null;
+ if(body.category!=='Sponsor'&&!state.registrationInvitation){body.sponsor_name=null;body.sponsor_other=null;}
+ if(!DISCIPLINE_CATEGORIES.has(body.category)){body.discipline=null;body.discipline_other=null;}else if(body.discipline!=='Other')body.discipline_other=null;
+ if(!SERVICE_CATEGORIES.has(body.category)){body.service=null;body.service_other=null;}else if(body.service!=='Other')body.service_other=null;
  if(SPONSOR_CATEGORIES.has(body.category)&&body.accommodation_required)body.dinners_required='Dinner with event guests each night';
- if(!body.accommodation_required){body.hotel_preference=null;body.accommodation_from=null;body.accommodation_to=null;body.share_room=false;body.sharing_with=null;body.room_sharing_option=null;body.dinners_required=null;body.dietary_requirements=null;}else if(!body.share_room){body.sharing_with=null;body.room_sharing_option=null;}
+ if(!body.accommodation_required){body.hotel_preference=null;body.accommodation_from=null;body.accommodation_to=null;body.share_room=false;body.sharing_with=null;body.room_sharing_option=null;body.dinners_required=null;body.dietary_requirements=null;}else{if(!SPONSOR_CATEGORIES.has(body.category))body.hotel_preference=null;if(!body.share_room){body.sharing_with=null;body.room_sharing_option=null;}}
  if(!body.lift_pass_required){body.first_ski_day=null;body.last_ski_day=null;body.date_of_birth=null;body.carre_neige_required=false;}
  if(!body.lessons_required){body.lesson_type=null;body.lesson_dates=[];}
  btn.disabled=true;btn.textContent='Submitting…';result.innerHTML='';
@@ -567,7 +586,7 @@ function openIntake(id){
  const p=row.raw_payload||{};
  const actions=canReviewIntake()&&row.processing_status!=='accepted'?`<div class="review-actions"><div class="field"><label for="reviewNotes">Review notes</label><textarea id="reviewNotes" placeholder="Optional internal note">${esc(row.review_notes||'')}</textarea></div><div id="reviewResult"></div><div class="actions"><button class="btn btn-primary" data-intake-decision="accepted">Approve registration</button><button class="btn btn-ghost" data-intake-decision="review_required">Needs follow-up</button><button class="btn btn-danger" data-intake-decision="rejected">Reject</button></div></div>`:`<div class="notice ${row.processing_status==='accepted'?'success':''}">${row.processing_status==='accepted'?'This request has been approved and linked to an attendee record.':'You have read-only access to this registration.'}</div>`;
  el.innerHTML=`<section class="review-panel"><div class="review-heading"><div><span class="status ${statusClass(row.processing_status)}">${esc(statusLabel(row.processing_status))}</span><h3>${esc(`${p.title_rank||''} ${p.first_name||''} ${p.surname||''}`.trim()||'Registration')}</h3><p>${esc(row.attendee_email||'')}</p></div><button class="btn btn-ghost btn-small" id="closeIntake">Close</button></div>
- <div class="review-sections"><section><h4>Attendee</h4>${detailRows([['Category',p.category],['Organisation',p.sponsor_name],['Role / appointment',p.role],['Service',p.service],['Discipline',p.discipline],['Mobile',p.mobile],['Post nominals',p.post_nominals]])}</section>
+ <div class="review-sections"><section><h4>Attendee</h4>${detailRows([['Category',p.category],['Sponsor',p.sponsor_name],['Role/Job Title/Appointment/Position',p.role],['Service',p.service==='Other'?p.service_other:p.service],['Discipline',p.discipline==='Other'?p.discipline_other:p.discipline],['Mobile',p.mobile],['Post nominals',p.post_nominals]])}</section>
  <section><h4>Accommodation</h4>${detailRows([['Required',p.accommodation_required],['Hotel preference',p.hotel_preference],['From',p.accommodation_from],['To',p.accommodation_to],['Room share',p.share_room],['Sharing with',p.sharing_with],['Room setup',p.room_sharing_option],['Evening meals',p.dinners_required],['Dietary requirements',p.dietary_requirements]])}</section>
  <section><h4>Arrival</h4>${detailRows([['Method',p.arrival_method],['Other method',p.arrival_method_other],['Airport',p.arrival_airport_station],['Flight number',p.arrival_number],['Flight date and time',p.arrival_datetime],['Expected in Méribel',p.arrival_resort_datetime],['Transfer requested',p.arrival_transfer],['Requested transfer',p.arrival_transfer_option],['Special transfer time',p.arrival_special_transfer_datetime]])}</section>
  <section><h4>Departure</h4>${detailRows([['Method',p.departure_method],['Other method',p.departure_method_other],['Airport',p.departure_airport_station],['Flight number',p.departure_number],['Flight date and time',p.departure_datetime],['Leave Méribel',p.departure_resort_datetime],['Transfer requested',p.departure_transfer],['Requested transfer',p.departure_transfer_option],['Special transfer time',p.departure_special_transfer_datetime]])}</section>
