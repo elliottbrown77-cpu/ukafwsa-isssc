@@ -120,6 +120,14 @@ export function createRoomAllocator({client,eventId,getProfile,escapeHtml,toast}
     document.querySelector('#allocatorDetail')?.scrollIntoView({behavior:'smooth',block:'start'});
     await loadSuggestions();
   }
+  async function openAttendee(attendeeId){
+    while(state.loading)await new Promise(resolve=>setTimeout(resolve,25));
+    if(!state.requests.length)await load();
+    const target=state.requests.find(row=>row.attendee_id===attendeeId&&row.source_active&&row.allocation_status!=='cancelled');
+    state.view='queue';state.status='active';state.hotel='all';state.query='';state.manualRequestId=null;state.roomEditorId=null;
+    if(!target){state.selectedRequestId=null;render();return false;}
+    await openRequest(target.id);return true;
+  }
   async function loadSuggestions(){
     if(!state.selectedRequestId)return;
     const el=document.querySelector('#roomSuggestions');if(el)el.innerHTML='<div class="empty">Checking room capacity and dates…</div>';
@@ -185,5 +193,5 @@ export function createRoomAllocator({client,eventId,getProfile,escapeHtml,toast}
     bindBody();
   }
 
-  return {markup,bind,load};
+  return {markup,bind,load,openAttendee};
 }

@@ -6,7 +6,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     publicSection: 'today',
     staffSection: 'programme',
     announcements: [], venues: [], schedule: [], documents: [], results: [], media: [],
-    plans: [], tables: [], assignments: [], transfers: [], passengers: [],
+    plans: [], tables: [], assignments: [], transfers: [], passengers: [], myArrangements: null, myArrangementsError: null,
     attendees: [], sponsors: [], notificationDeliveries: [],
     pushStatus: null, pushEnabled: false, pushSupported: true, notificationResult: null,
     pendingLoginEmail: sessionStorage.getItem('isssc-event-login-email') || '',
@@ -134,7 +134,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     return `<div class="hero-mini event-app-hero"><span class="eyebrow">Event app</span><h2>ISSSC 2027 in Méribel</h2><p>Live programme, race locations, results, coverage and operational information.</p></div>
     <section id="notificationOptIn" class="notification-opt-in">${notificationLoginMarkup()}</section>
     <div class="event-app-nav" role="navigation" aria-label="Event information">
-      ${[['today','Today'],['programme','Programme'],['locations','Locations'],['results','Results'],['media','Media'],['coverage','BFBS'],['tables','Table plans'],['transfers','Transfers']].map(([id,label]) => `<button class="${state.publicSection === id ? 'active' : ''}" data-event-section="${id}">${label}</button>`).join('')}
+      ${[['today','Today'],['arrangements','My arrangements'],['programme','Programme'],['locations','Locations'],['results','Results'],['media','Media'],['coverage','BFBS'],['tables','Table plans'],['transfers','Transfers']].map(([id,label]) => `<button class="${state.publicSection === id ? 'active' : ''}" data-event-section="${id}">${label}</button>`).join('')}
     </div>
     <div id="eventAppContent" class="event-app-content"><div class="surface"><div class="surface-body empty">Loading event information...</div></div></div>`;
   }
@@ -168,8 +168,12 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
         client.from('transfer_passengers').select('*').order('sort_order'),
       ]);
       [state.plans, state.tables, state.assignments, state.transfers, state.passengers] = privateResults.map(result => result.data || []);
+      const arrangements = await client.rpc('get_my_arrangements', { p_event_id: eventId });
+      state.myArrangements = arrangements.data || null;
+      state.myArrangementsError = arrangements.error?.message || null;
     } else {
       state.plans = []; state.tables = []; state.assignments = []; state.transfers = []; state.passengers = [];
+      state.myArrangements = null; state.myArrangementsError = null;
     }
     renderPublicContent();
     await refreshNotificationOptIn();
@@ -286,6 +290,48 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
       }
     };
     bindEmailCodeControls(document.querySelector('#eventAppContent') || document);
+    const signOut = document.querySelector('#attendeeEventSignOut');
+    if (signOut) signOut.onclick = async () => { await client.auth.signOut(); state.myArrangements = null; state.myArrangementsError = null; toast('Signed out'); };
+  }
+
+  const arrangementState = value => {
+    const config = { confirmed: ['green', 'Confirmed'], pending: ['amber', 'Pending Protocol confirmation'], not_required: ['', 'Not requested'] }[value] || ['amber', 'Pending'];
+    return `<span class="status ${config[0]}">${config[1]}</span>`;
+  };
+  const arrangementValue = value => value === true ? 'Yes' : value === false ? 'No' : value == null || value === '' ? '' : String(value);
+  const arrangementRows = rows => {
+    const present = rows.filter(([, value]) => arrangementValue(value));
+    return present.length ? `<dl class="arrangement-facts">${present.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(arrangementValue(value))}</dd></div>`).join('')}</dl>` : '<p class="muted small">No details recorded.</p>';
+  };
+  function arrangementCard(title, item, requestedRows, confirmedRows) {
+    const hasAssigned = confirmedRows.some(([, value]) => arrangementValue(value));
+    return `<article class="arrangement-card"><div class="arrangement-card-head"><h4>${esc(title)}</h4>${arrangementState(item?.state)}</div><div class="arrangement-columns"><section><strong>Requested</strong>${arrangementRows(requestedRows)}</section><section><strong>Assigned by Protocol</strong>${item?.state === 'confirmed' || hasAssigned ? arrangementRows(confirmedRows) : '<p class="muted small">Awaiting a final Protocol decision.</p>'}</section></div></article>`;
+  }
+  function renderMyArrangements() {
+    if (!getSession()) return eventLoginMarkup('your arrangements');
+    if (state.myArrangementsError) return `<div class="notice error">Your arrangements could not be loaded: ${esc(state.myArrangementsError)}</div>`;
+    const people = state.myArrangements?.attendees || [];
+    if (!people.length) return `<section class="surface"><div class="surface-body"><div class="notice"><strong>No attendee record is linked to this sign-in yet.</strong><p>Use the same email address entered on the registration form. If the registration has already been approved, ask Protocol to check the attendee email.</p></div><button class="btn btn-ghost btn-small" id="attendeeEventSignOut" type="button">Sign out</button></div></section>`;
+    return `<div class="my-arrangements-intro"><div><span class="status purple">Private</span><h3>My arrangements</h3><p>Requests are shown beside the final details confirmed by Protocol. Prices and internal staff notes are not displayed.</p></div><button class="btn btn-ghost btn-small" id="attendeeEventSignOut" type="button">Sign out</button></div>${people.map(person => {
+      const request = person.request || {}, accommodation = person.accommodation || {}, arrival = person.arrival || {}, departure = person.departure || {}, lift = person.lift_pass || {};
+      const arrivalTransfer = (person.transfers || []).find(item => item.direction === 'arrival');
+      const departureTransfer = (person.transfers || []).find(item => item.direction === 'departure');
+      return `<section class="surface attendee-arrangements"><div class="surface-head"><div><span class="status ${person.attendance_status === 'confirmed' ? 'green' : 'purple'}">${esc(person.attendance_status || 'Expected')}</span><h3>${esc(person.display_name)}</h3><p>${esc(person.category || '')}</p></div></div><div class="surface-body arrangements-grid">
+        ${arrangementCard('Hotel room', accommodation,
+          [['Hotel preference', accommodation.requested_hotel], ['Requested stay', accommodation.requested_check_in && accommodation.requested_check_out ? `${accommodation.requested_check_in} to ${accommodation.requested_check_out}` : ''], ['Room share requested', accommodation.requested_share], ['Share with', accommodation.requested_share_with]],
+          [['Hotel', accommodation.hotel], ['Room', accommodation.room], ['Confirmed stay', accommodation.check_in && accommodation.check_out ? `${accommodation.check_in} to ${accommodation.check_out}` : '']])}
+        ${arrangementCard('Arrival and transfer', arrival,
+          [['Method', arrival.requested_method], ['Airport / station', arrival.requested_point], ['Flight / travel number', arrival.requested_number], ['Requested time', arrival.requested_time], ['Transfer request', arrival.requested_transfer]],
+          [['Method', arrival.method], ['Airport / station', arrival.point], ['Flight / travel number', arrival.number], ['Travel time', arrival.travel_time], ['Transfer', arrivalTransfer?.name || arrival.transfer_service], ['Pickup', arrivalTransfer?.pickup], ['Destination', arrivalTransfer?.destination], ['Departure time', arrivalTransfer?.departure_at], ['Driver', [arrivalTransfer?.driver_name, arrivalTransfer?.driver_mobile].filter(Boolean).join(' · ')]])}
+        ${arrangementCard('Departure and transfer', departure,
+          [['Method', departure.requested_method], ['Airport / station', departure.requested_point], ['Flight / travel number', departure.requested_number], ['Requested time', departure.requested_time], ['Transfer request', departure.requested_transfer]],
+          [['Method', departure.method], ['Airport / station', departure.point], ['Flight / travel number', departure.number], ['Travel time', departure.travel_time], ['Transfer', departureTransfer?.name || departure.transfer_service], ['Pickup', departureTransfer?.pickup], ['Destination', departureTransfer?.destination], ['Departure time', departureTransfer?.departure_at], ['Driver', [departureTransfer?.driver_name, departureTransfer?.driver_mobile].filter(Boolean).join(' · ')]])}
+        ${arrangementCard('Lift pass', lift,
+          [['Lift pass requested', request.lift_pass_required], ['First ski day', request.first_ski_day], ['Last ski day', request.last_ski_day]],
+          [['Pass required', lift.required], ['Pass type', lift.pass_type], ['Valid from', lift.start_date], ['Valid to', lift.end_date], ['Carre Neige', lift.carre_neige]])}
+        <article class="arrangement-card arrangement-other"><div class="arrangement-card-head"><h4>Other requests</h4><span class="status purple">Registration</span></div>${arrangementRows([['Lessons requested', request.lessons_required], ['Lesson type', request.lesson_type], ['Lesson dates', Array.isArray(request.lesson_dates) ? request.lesson_dates.join(', ') : request.lesson_dates], ['Equipment hire requested', request.equipment_hire_required], ['Dinners requested', request.dinners_required]])}</article>
+      </div></section>`;
+    }).join('')}`;
   }
 
   function renderPublicContent() {
@@ -296,6 +342,8 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
       const notices = state.announcements.slice(0, 5);
       const nextItems = state.schedule.slice(0, 6);
       el.innerHTML = `<div class="event-overview-grid"><section class="surface"><div class="surface-head"><strong>Latest notices</strong></div><div class="surface-body">${notices.length ? `<div class="event-feed">${notices.map(row => `<article><span class="status ${row.priority === 'urgent' ? 'red' : row.priority === 'important' ? 'amber' : 'purple'}">${esc(row.priority)}</span><h3>${esc(row.title)}</h3><p>${esc(row.body)}</p>${safeUrl(row.action_url) ? `<a class="text-link" href="${esc(safeUrl(row.action_url))}" target="_blank" rel="noopener">${esc(row.action_label || 'Open link')}</a>` : ''}</article>`).join('')}</div>` : '<div class="empty">No notices have been published yet.</div>'}</div></section><section class="surface"><div class="surface-head"><strong>Programme highlights</strong></div><div class="surface-body">${nextItems.length ? `<div class="event-agenda">${nextItems.map(row => `<article><time>${esc(formatDate(row.starts_at))}<strong>${esc(formatTime(row.starts_at))}</strong></time><div><h3>${esc(row.title)}</h3><p>${esc([row.category, venueName(row.venue_id)].filter(Boolean).join(' · '))}</p></div></article>`).join('')}</div>` : '<div class="empty">The programme will appear here when published.</div>'}</div></section></div>`;
+    } else if (state.publicSection === 'arrangements') {
+      el.innerHTML = renderMyArrangements();
     } else if (state.publicSection === 'programme') {
       const days = Object.groupBy ? Object.groupBy(state.schedule, row => row.starts_at.slice(0, 10)) : state.schedule.reduce((out, row) => ((out[row.starts_at.slice(0, 10)] ||= []).push(row), out), {});
       el.innerHTML = state.schedule.length ? Object.entries(days).map(([day, rows]) => `<section class="surface event-day"><div class="surface-head"><strong>${esc(formatDate(day))}</strong></div><div class="surface-body event-agenda">${rows.map(row => `<article><time><strong>${esc(formatTime(row.starts_at))}</strong>${row.ends_at ? `<span>to ${esc(formatTime(row.ends_at))}</span>` : ''}</time><div><span class="status purple">${esc(row.category || 'Event')}</span><h3>${esc(row.title)}</h3><p>${esc(row.description || row.attendee_notes || '')}</p>${venueName(row.venue_id) ? `<small>${esc(venueName(row.venue_id))}</small>` : ''}${safeUrl(row.stream_url) ? `<a class="text-link" href="${esc(safeUrl(row.stream_url))}" target="_blank" rel="noopener">Watch BFBS coverage</a>` : ''}</div></article>`).join('')}</div></section>`).join('') : '<div class="surface"><div class="surface-body empty">The programme has not been published yet.</div></div>';
@@ -314,7 +362,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
       else el.innerHTML = `<div class="private-data-banner">Published table allocations are visible only to signed-in attendees and staff.</div>${state.plans.map(plan => `<section class="surface event-day"><div class="surface-head"><div><strong>${esc(formatDate(plan.event_date))}</strong><div class="small muted">Dinner ${esc(plan.dinner_time?.slice(0,5) || '')}</div></div></div><div class="surface-body table-plan-grid">${state.tables.filter(table => table.table_plan_id === plan.id).map(table => `<article class="event-table"><h3>${esc(table.table_name)}</h3><ol>${Array.from({ length: table.capacity || 10 }, (_, index) => { const assignment = state.assignments.find(item => item.seating_table_id === table.id && item.seat_number === index + 1); return `<li><span>${index + 1}</span><strong>${esc(assignment?.occupant_name_snapshot || 'Available')}</strong>${assignment?.guest_role ? `<small>${esc(assignment.guest_role)}</small>` : ''}</li>`; }).join('')}</ol></article>`).join('')}</div></section>`).join('')}`;
     } else if (state.publicSection === 'transfers') {
       if (!state.transfers.length) el.innerHTML = eventLoginMarkup('transfer information');
-      else el.innerHTML = `<div class="private-data-banner">Contact details and passenger lists are protected and visible only to signed-in attendees and staff.</div><div class="transfer-public-list">${state.transfers.map(run => { const passengers = state.passengers.filter(item => item.transfer_run_id === run.id); return `<article class="surface transfer-public-card"><div class="surface-head"><div><span class="status ${run.status === 'confirmed' ? 'green' : 'purple'}">${esc(run.status)}</span><h3>${esc(run.transfer_name)}</h3><p>${esc(formatDate(run.departure_at))} at ${esc(formatTime(run.departure_at))}</p></div><strong>${passengers.length} passenger${passengers.length === 1 ? '' : 's'}</strong></div><div class="surface-body"><dl class="transfer-facts"><div><dt>Route</dt><dd>${esc(run.pickup_location)} to ${esc(run.destination)}</dd></div><div><dt>Service</dt><dd>${esc(run.service_type || run.vehicle_details || 'To be confirmed')}</dd></div><div><dt>Driver</dt><dd>${esc([run.driver_name, run.driver_mobile].filter(Boolean).join(' · ') || 'To be confirmed')}</dd></div><div><dt>Lead traveller</dt><dd>${esc([run.lead_traveller_name, run.lead_traveller_mobile].filter(Boolean).join(' · ') || 'To be confirmed')}</dd></div></dl>${run.attendee_notes ? `<div class="notice">${esc(run.attendee_notes)}</div>` : ''}<div class="passenger-chips">${passengers.map(item => `<span>${esc(item.passenger_name_snapshot)}</span>`).join('')}</div></div></article>`; }).join('')}</div>`;
+      else { const staffView = ['admin','protocol','operations','read_only'].includes(role()); el.innerHTML = `<div class="private-data-banner">${staffView?'Authorised staff view: full published manifests are shown.':'Only transfers containing your attendee record are shown. Authorised staff can see the full manifest.'}</div><div class="transfer-public-list">${state.transfers.map(run => { const passengers = state.passengers.filter(item => item.transfer_run_id === run.id); return `<article class="surface transfer-public-card"><div class="surface-head"><div><span class="status ${run.status === 'confirmed' ? 'green' : 'purple'}">${esc(run.status)}</span><h3>${esc(run.transfer_name)}</h3><p>${esc(formatDate(run.departure_at))} at ${esc(formatTime(run.departure_at))}</p></div><strong>${staffView?`${passengers.length} passenger${passengers.length===1?'':'s'}`:'Your transfer'}</strong></div><div class="surface-body"><dl class="transfer-facts"><div><dt>Route</dt><dd>${esc(run.pickup_location)} to ${esc(run.destination)}</dd></div><div><dt>Service</dt><dd>${esc(run.service_type || run.vehicle_details || 'To be confirmed')}</dd></div><div><dt>Driver</dt><dd>${esc([run.driver_name, run.driver_mobile].filter(Boolean).join(' · ') || 'To be confirmed')}</dd></div><div><dt>Lead traveller</dt><dd>${esc([run.lead_traveller_name, run.lead_traveller_mobile].filter(Boolean).join(' · ') || 'To be confirmed')}</dd></div></dl>${run.attendee_notes ? `<div class="notice">${esc(run.attendee_notes)}</div>` : ''}<div class="passenger-chips">${passengers.map(item => `<span>${esc(item.passenger_name_snapshot)}</span>`).join('')}</div></div></article>`; }).join('')}</div>`; }
     }
     bindEventLogin();
   }
