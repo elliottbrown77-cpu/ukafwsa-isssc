@@ -643,24 +643,29 @@ function selectedOptions(values,current,placeholder='Select…'){
 
 async function loadProtocol(){
  const el=document.querySelector('#protocolTable');if(!el)return;el.textContent='Loading attendees…';
- const [attendees,locations,rooms,rates,organisations,overview]=await Promise.all([
+ const [attendees,locations,rooms,rates,organisations,overview,additional,serviceStatuses]=await Promise.all([
   supabase.from('attendees').select('id,attendance_status,category,display_company,organisation_id,title_rank,first_name,surname,known_as,post_nominals,email,mobile,service,discipline,position_role,dietary_requirements,date_of_birth,equipment_hire_required,boot_size,attendee_notes,protocol_notes,data_checked,checked_at,created_at,record_source').eq('event_id',EVENT_ID).order('surname').order('first_name').limit(500),
   supabase.from('accommodation_locations').select('id,name,location_type').eq('active',true).order('name'),
   supabase.from('room_types').select('id,location_id,name,occupancy_class,meal_basis').eq('active',true).order('name'),
-  supabase.from('rate_card').select('rate_code,description,charge_category,location_id,room_type_id,unit,unit_price,status').eq('event_id',EVENT_ID).eq('active',true).in('charge_category',['accommodation','lift_pass']).order('description'),
+  supabase.from('rate_card').select('rate_code,description,charge_category,location_id,room_type_id,unit,unit_price,status').eq('event_id',EVENT_ID).eq('active',true).order('description'),
   supabase.from('organisations').select('id,organisation_name').eq('active',true).order('organisation_name'),
-  supabase.rpc('get_protocol_attendee_service_overview',{p_event_id:EVENT_ID})
+  supabase.rpc('get_protocol_attendee_service_overview',{p_event_id:EVENT_ID}),
+  supabase.rpc('get_protocol_additional_service_overview',{p_event_id:EVENT_ID}),
+  supabase.from('attendee_service_items').select('attendee_id,service_type,status')
  ]);
- const errors=[attendees.error,locations.error,rooms.error,rates.error,organisations.error,overview.error].filter(Boolean);
+ const errors=[attendees.error,locations.error,rooms.error,rates.error,organisations.error,overview.error,additional.error,serviceStatuses.error].filter(Boolean);
  if(errors.length){el.innerHTML=`<div class="notice error">${esc(errors.map(error=>error.message).join('; '))}</div>`;return;}
  state.protocolRows=attendees.data||[];
- state.protocolOverview=overview.data?.rows||[];
+ const additionalById=new Map((additional.data?.rows||[]).map(row=>[row.attendee_id,{...row}]));
+ (serviceStatuses.data||[]).forEach(item=>{const extra=additionalById.get(item.attendee_id);if(!extra)return;const key=({lesson:'lesson_state',equipment_hire:'equipment_state',dinner:'dinner_state',champagne:'additional_state',other:'additional_state'})[item.service_type];if(!key)return;(extra._statuses||={});(extra._statuses[key]||=[]).push(item.status);});
+ additionalById.forEach(extra=>{Object.entries(extra._statuses||{}).forEach(([key,statuses])=>{if(statuses.includes('confirmed'))extra[key]='confirmed';else if(statuses.includes('pending'))extra[key]='pending';else if(statuses.length&&statuses.every(status=>status==='cancelled')&&extra[key]!=='confirmed')extra[key]='cancelled';});const states=['lesson_state','equipment_state','dinner_state','room_share_state','additional_state'].map(key=>extra[key]);extra.extra_pending_count=states.filter(value=>value==='pending').length;extra.extra_confirmed_count=states.filter(value=>value==='confirmed'||value==='cancelled').length;delete extra._statuses;});
+ state.protocolOverview=(overview.data?.rows||[]).map(row=>{const extra=additionalById.get(row.attendee_id)||{},pending=Number(row.pending_count||0)+Number(extra.extra_pending_count||0),confirmed=Number(row.confirmed_count||0)+Number(extra.extra_confirmed_count||0);return{...row,...extra,pending_count:pending,confirmed_count:confirmed,overall_state:pending?'pending':confirmed?'confirmed':'no_requests'};});
  state.protocolLookups={locations:locations.data||[],rooms:rooms.data||[],rates:rates.data||[],organisations:organisations.data||[]};
  renderProtocolRows();
 }
 
 function protocolServiceState(stateValue,summary=''){
- const config={confirmed:['green','Confirmed'],pending:['amber','Pending'],not_required:['','Not requested'],no_requests:['','No requests']}[stateValue]||['amber','Pending'];
+ const config={confirmed:['green','Confirmed'],pending:['amber','Pending'],cancelled:['red','Not supplied'],not_required:['','Not requested'],no_requests:['','No requests']}[stateValue]||['amber','Pending'];
  return `<span class="service-state"><span class="status ${config[0]}">${config[1]}</span>${summary?`<small>${esc(summary)}</small>`:''}</span>`;
 }
 function renderProtocolRows(){
@@ -670,8 +675,9 @@ function renderProtocolRows(){
  const rows=state.protocolRows.filter(a=>{const summary=summaryById.get(a.id)||{};return(!term||[a.first_name,a.surname,a.email,attendeeOrganisationName(a),a.category,summary.accommodation_summary,summary.arrival_summary,summary.departure_summary,summary.lift_summary].some(value=>String(value||'').toLowerCase().includes(term)))&&(state.protocolServiceFilter==='all'||summary.overall_state===state.protocolServiceFilter);});
  if(!rows.length){el.innerHTML='<div class="empty">No attendees match this view.</div>';return;}
  const pending=state.protocolOverview.filter(row=>row.overall_state==='pending').length,confirmed=state.protocolOverview.filter(row=>row.overall_state==='confirmed').length;
- el.innerHTML=`<div class="service-overview-metrics"><div><strong>${state.protocolOverview.length}</strong><span>Attendees</span></div><div><strong>${pending}</strong><span>Need action</span></div><div><strong>${confirmed}</strong><span>Services confirmed</span></div></div><div class="table-scroll"><table class="data-table protocol-table protocol-service-table"><thead><tr><th>Attendee</th><th>Hotel room</th><th>Arrival</th><th>Departure</th><th>Lift pass</th><th>Overall</th><th></th></tr></thead><tbody>${rows.map(a=>{const s=summaryById.get(a.id)||{};return`<tr><td><strong>${esc(`${a.title_rank||''} ${a.first_name||''} ${a.surname||''}`.trim())}</strong>${a.record_source==='protocol_manual'?'<span class="status purple attendee-source">Protocol entry</span>':''}<br><small>${esc([a.category,attendeeOrganisationName(a)].filter(Boolean).join(' · '))}</small></td><td>${protocolServiceState(s.accommodation_state,s.accommodation_summary)}</td><td>${protocolServiceState(s.arrival_state,s.arrival_summary)}</td><td>${protocolServiceState(s.departure_state,s.departure_summary)}</td><td>${protocolServiceState(s.lift_state,s.lift_summary)}</td><td><span class="status ${s.overall_state==='confirmed'?'green':s.overall_state==='pending'?'amber':''}">${s.overall_state==='confirmed'?'Confirmed':s.overall_state==='pending'?`${s.pending_count||0} pending`:'No requests'}</span>${s.other_requests?.length?`<small class="other-request-list">${esc(s.other_requests.join(' · '))}</small>`:''}</td><td><button class="btn btn-ghost btn-small" data-open-attendee="${a.id}">View / amend</button></td></tr>`}).join('')}</tbody></table></div>`;
- document.querySelectorAll('[data-open-attendee]').forEach(button=>button.onclick=()=>openProtocolAttendee(button.dataset.openAttendee));
+ const serviceCell=(label,stateValue,summary)=>`<span class="attendee-service-cell"><strong>${esc(label)}</strong>${protocolServiceState(stateValue,summary)}</span>`;
+ el.innerHTML=`<div class="service-overview-metrics"><div><strong>${state.protocolOverview.length}</strong><span>Attendees</span></div><div><strong>${pending}</strong><span>Need action</span></div><div><strong>${confirmed}</strong><span>Services resolved</span></div></div><div class="attendee-summary-list">${rows.map(a=>{const s=summaryById.get(a.id)||{};return`<article class="attendee-summary-card" data-open-attendee="${a.id}" role="button" tabindex="0" aria-label="Open and amend ${esc(`${a.first_name||''} ${a.surname||''}`.trim())}"><div class="attendee-summary-head"><div><div class="attendee-name-line"><h3>${esc(`${a.title_rank||''} ${a.first_name||''} ${a.surname||''}`.trim())}</h3>${a.record_source==='protocol_manual'?'<span class="status purple">Protocol entry</span>':''}</div><p>${esc([a.category,attendeeOrganisationName(a)].filter(Boolean).join(' · '))}</p></div><span class="attendee-open-action">Open and amend <span aria-hidden="true">→</span></span></div><div class="attendee-service-grid">${serviceCell('Hotel room',s.accommodation_state,s.accommodation_summary)}${serviceCell('Room sharing',s.room_share_state,s.room_share_summary)}${serviceCell('Arrival',s.arrival_state,s.arrival_summary)}${serviceCell('Departure',s.departure_state,s.departure_summary)}${serviceCell('Lift pass',s.lift_state,s.lift_summary)}${serviceCell('Lessons',s.lesson_state,s.lesson_summary)}${serviceCell('Equipment hire',s.equipment_state,s.equipment_summary)}${serviceCell('Evening meals',s.dinner_state,s.dinner_summary)}${s.additional_state!=='not_required'?serviceCell('Additional items',s.additional_state,s.additional_summary):''}</div><div class="attendee-summary-foot"><span class="status ${s.overall_state==='confirmed'?'green':s.overall_state==='pending'?'amber':''}">${s.overall_state==='confirmed'?'All recorded services resolved':s.overall_state==='pending'?`${s.pending_count||0} item${Number(s.pending_count)===1?'':'s'} need action`:'No services requested'}</span><span>Select anywhere on this card to view or amend the attendee</span></div></article>`}).join('')}</div>`;
+ document.querySelectorAll('[data-open-attendee]').forEach(card=>{card.onclick=()=>openProtocolAttendee(card.dataset.openAttendee);card.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openProtocolAttendee(card.dataset.openAttendee);}};});
 }
 
 function attendeeOrganisationName(attendee){return state.protocolLookups.organisations.find(org=>org.id===attendee.organisation_id)?.organisation_name||attendee.display_company;}
@@ -699,13 +705,14 @@ async function openProtocolAttendee(id){
  document.querySelector('#closeProtocol').onclick=()=>{el.innerHTML='';};
  const form=document.querySelector('#attendeeCoreForm');if(form&&editable)form.onsubmit=event=>saveAttendeeCore(event,attendee.id);
  el.scrollIntoView({behavior:'smooth',block:'start'});
- const [intake,stays,travel,lift]=await Promise.all([
+ const [intake,stays,travel,lift,serviceItems]=await Promise.all([
  supabase.from('intake_submissions').select('raw_payload').eq('mapped_attendee_id',id).maybeSingle(),
   supabase.from('stay_charge_periods').select('id,location_id,room_type_id,sharing_with_attendee_id,requested_location,requested_check_in,requested_check_out,requested_room_share,requested_share_with,requested_dinners,actual_check_in,actual_check_out,billing_from,billing_to,package_type,rate_code,billable_nights,unit_rate,accommodation_charge,approved_exception,exception_notes,protocol_confirmed,accommodation_locations(name),room_types(name)').eq('attendee_id',id).order('created_at'),
   supabase.from('travel_records').select('id,direction,method_of_transport,airport_station,flight_travel_number,travel_datetime,resort_datetime,transfer_requested,transfer_service,transfer_chargeable,special_transfer_datetime,assignment_notes,protocol_confirmed,billing_reviewed').eq('attendee_id',id).order('direction'),
-  supabase.from('lift_passes').select('id,required,pass_type,start_date,end_date,carre_neige_required,chargeable,rate_code,unit_rate,pass_days,total_charge,protocol_confirmed,notes').eq('attendee_id',id).maybeSingle()
+  supabase.from('lift_passes').select('id,required,pass_type,start_date,end_date,carre_neige_required,chargeable,rate_code,unit_rate,pass_days,total_charge,protocol_confirmed,notes').eq('attendee_id',id).maybeSingle(),
+  supabase.from('attendee_service_items').select('id,service_type,service_date,title,status,quantity,chargeable,rate_code,attendee_details,protocol_notes,usage_extra_id,confirmed_at').eq('attendee_id',id).order('service_date',{ascending:true,nullsFirst:false}).order('created_at')
  ]);
- if(document.querySelector('#protocolServices'))renderProtocolServices(intake.data?.raw_payload||{},stays.data||[],travel.data||[],lift.data||null,[intake.error,stays.error,travel.error,lift.error].filter(Boolean),attendee);
+ if(document.querySelector('#protocolServices'))renderProtocolServices(intake.data?.raw_payload||{},stays.data||[],travel.data||[],lift.data||null,serviceItems.data||[],[intake.error,stays.error,travel.error,lift.error,serviceItems.error].filter(Boolean),attendee);
 }
 
 function dateTimeLocalValue(value){
@@ -802,7 +809,62 @@ function liftForm(lift,request){
  <div class="field checkbox full"><input type="checkbox" name="protocol_confirmed" ${lift?.protocol_confirmed?'checked':''}${disabled}><label>Protocol confirmed</label></div><div class="field full"><label>Lift-pass notes</label><textarea name="notes"${disabled}>${esc(lift?.notes||'')}</textarea></div></div>
  ${editable?'<div class="service-actions"><button class="btn btn-primary" type="submit">Save lift pass</button><div class="service-save-result"></div></div>':''}</form>`;
 }
-function renderProtocolServices(request,stays,travel,lift,errors,attendee){
+function additionalRateRows(serviceType){
+ const categories={lesson:['lesson_group','lesson_private','lesson_telemark'],dinner:['dinner'],champagne:['champagne'],equipment_hire:['equipment_hire'],other:[]}[serviceType]||[];
+ return state.protocolLookups.rates.filter(rate=>rate.status==='approved'&&categories.includes(rate.charge_category));
+}
+function additionalRateOptions(serviceType,current){
+ const rows=additionalRateRows(serviceType),selectedRate=current&&!rows.some(row=>row.rate_code===current)?state.protocolLookups.rates.find(row=>row.rate_code===current):null,all=selectedRate?[selectedRate,...rows]:rows;
+ return `<option value="">${rows.length?'Choose approved rate…':'No approved rate for this item'}</option>${all.map(rate=>`<option value="${esc(rate.rate_code)}" ${rate.rate_code===current?'selected':''}>${esc(rate.description)} · ${money(rate.unit_price)}</option>`).join('')}`;
+}
+function requestedServiceSeeds(items,request){
+ const rows=[...items];
+ if(request.lessons_required&&!rows.some(item=>item.service_type==='lesson'))rows.push({service_type:'lesson',title:request.lesson_type||'Requested lesson',status:'pending',quantity:Array.isArray(request.lesson_dates)&&request.lesson_dates.length?request.lesson_dates.length:1,attendee_details:Array.isArray(request.lesson_dates)&&request.lesson_dates.length?`Requested dates: ${request.lesson_dates.join(', ')}`:'Lesson requested',requested_seed:true});
+ if(request.equipment_hire_required&&!rows.some(item=>item.service_type==='equipment_hire'))rows.push({service_type:'equipment_hire',title:'Equipment hire',status:'pending',quantity:1,attendee_details:['Equipment hire requested',request.boot_size?`Boot size: ${request.boot_size}`:''].filter(Boolean).join(' · '),requested_seed:true});
+ if(request.dinners_required&&!rows.some(item=>item.service_type==='dinner'))rows.push({service_type:'dinner',title:'Evening meals',status:'pending',quantity:1,attendee_details:request.dinners_required,requested_seed:true});
+ return rows;
+}
+function serviceTypeLabel(value){return({lesson:'Lesson',equipment_hire:'Equipment hire',dinner:'Evening meal',champagne:'Champagne',other:'Other item'})[value]||value;}
+function protocolServiceItemForm(item={service_type:'lesson',status:'pending',quantity:1}){
+ const editable=canEditProtocol(),disabled=editable?'':' disabled',type=item.service_type||'lesson';
+ return `<form class="service-form additional-service-form" data-item-id="${item.id||''}" data-requested-seed="${item.requested_seed?'true':'false'}"><div class="service-form-head"><div><span class="status ${item.status==='confirmed'?'green':item.status==='cancelled'?'red':'amber'}">${item.status==='confirmed'?'Confirmed':item.status==='cancelled'?'Cancelled':item.requested_seed?'Requested · pending':'Pending'}</span><strong>${esc(item.title||serviceTypeLabel(type))}</strong></div>${item.confirmed_at?`<small>Confirmed ${esc(formatDate(item.confirmed_at))}</small>`:''}</div><div class="form-grid compact-grid">
+ <div class="field"><label>Service type *</label><select name="service_type" required${disabled}>${[['lesson','Lesson'],['equipment_hire','Equipment hire'],['dinner','Evening meal'],['champagne','Champagne'],['other','Other item']].map(([value,label])=>`<option value="${value}" ${value===type?'selected':''}>${label}</option>`).join('')}</select></div>
+ <div class="field"><label>Status *</label><select name="status" required${disabled}><option value="pending" ${item.status==='pending'?'selected':''}>Pending</option><option value="confirmed" ${item.status==='confirmed'?'selected':''}>Confirmed</option><option value="cancelled" ${item.status==='cancelled'?'selected':''}>Cancelled / not supplied</option></select></div>
+ <div class="field"><label>Title *</label><input name="title" required value="${esc(item.title||'')}"${disabled}></div><div class="field"><label>Service date</label><input type="date" name="service_date" min="2027-01-27" max="2027-02-09" value="${esc(item.service_date||'')}"${disabled}></div>
+ <div class="field"><label>Quantity *</label><input type="number" name="quantity" min="0.01" step="0.01" value="${esc(item.quantity||1)}" required${disabled}></div><div class="field checkbox"><input type="checkbox" name="chargeable" ${item.chargeable?'checked':''}${disabled}><div><label>Chargeable item</label><small>Only use an approved event rate.</small></div></div>
+ <div class="field full"><label>Approved rate</label><select name="rate_code"${disabled}>${additionalRateOptions(type,item.rate_code||'')}</select></div>
+ <div class="field full"><label>Details visible to attendee</label><textarea name="attendee_details"${disabled} placeholder="What has been arranged or supplied">${esc(item.attendee_details||'')}</textarea></div>
+ <div class="field full"><label>Protocol notes</label><textarea name="protocol_notes"${disabled} placeholder="Internal notes; not visible to the attendee">${esc(item.protocol_notes||'')}</textarea></div></div>
+ ${editable?`<div class="service-actions"><button class="btn btn-primary" type="submit">${item.id?'Save item':'Confirm / add item'}</button>${item.id?'<button class="btn btn-ghost btn-small delete-service-item" type="button">Delete</button>':''}<div class="service-save-result"></div></div>`:''}</form>`;
+}
+function additionalServiceMarkup(items,request,attendeeId){
+ const rows=requestedServiceSeeds(items,request);
+ return `<section class="service-group additional-services-group"><div class="service-group-head"><div><h4>Lessons, equipment, meals and additional items</h4><p>Registration choices remain requests until Protocol records the final service here. Attendee-visible details are separate from internal notes.</p></div>${canEditProtocol()?'<button class="btn btn-ghost btn-small" id="addAdditionalService" type="button">Add item</button>':''}</div><div id="additionalServiceForms" class="service-form-list">${rows.length?rows.map(protocolServiceItemForm).join(''):'<div class="empty">No lessons, equipment hire, evening meals or additional items have been requested or recorded.</div>'}</div></section>`;
+}
+function bindAdditionalServiceForms(attendeeId,request){
+ document.querySelectorAll('.additional-service-form').forEach(form=>{
+  form.onsubmit=event=>saveAdditionalService(event,attendeeId);
+  const type=form.elements.service_type,rate=form.elements.rate_code,chargeable=form.elements.chargeable,status=form.elements.status;
+  type.onchange=()=>{rate.innerHTML=additionalRateOptions(type.value,'');if(!additionalRateRows(type.value).length){chargeable.checked=false;rate.value='';}};
+  chargeable.onchange=()=>{if(chargeable.checked){status.value='confirmed';if(!additionalRateRows(type.value).length){chargeable.checked=false;toast('No approved rate is available for this service type');}}else rate.value='';};
+  form.querySelector('.delete-service-item')?.addEventListener('click',()=>deleteAdditionalService(form.dataset.itemId,attendeeId));
+ });
+ const add=document.querySelector('#addAdditionalService');if(add)add.onclick=()=>{const holder=document.querySelector('#additionalServiceForms');if(holder?.querySelector('.empty'))holder.innerHTML='';holder?.insertAdjacentHTML('beforeend',protocolServiceItemForm());bindAdditionalServiceForms(attendeeId,request);holder?.lastElementChild?.scrollIntoView({behavior:'smooth',block:'nearest'});};
+}
+async function saveAdditionalService(event,attendeeId){
+ event.preventDefault();const form=event.currentTarget,body=formObject(form),button=form.querySelector('button[type=submit]'),result=form.querySelector('.service-save-result'),label=button.textContent;
+ if(body.chargeable&&!body.rate_code){result.innerHTML='<div class="notice error">Choose an approved rate before confirming a chargeable item.</div>';return;}
+ button.disabled=true;button.textContent='Saving…';result.innerHTML='';
+ const response=await supabase.rpc('save_protocol_service_item',{p_attendee_id:attendeeId,p_item_id:form.dataset.itemId||null,p_service_type:body.service_type,p_service_date:body.service_date||null,p_title:body.title,p_status:body.status,p_quantity:Number(body.quantity||1),p_chargeable:!!body.chargeable,p_rate_code:body.rate_code||null,p_attendee_details:body.attendee_details||null,p_protocol_notes:body.protocol_notes||null});
+ if(response.error){result.innerHTML=`<div class="notice error">${esc(response.error.message)}</div>`;button.disabled=false;button.textContent=label;return;}
+ toast('Attendee service saved');await loadProtocol();await openProtocolAttendee(attendeeId);
+}
+async function deleteAdditionalService(itemId,attendeeId){
+ if(!itemId||!confirm('Delete this attendee service item?'))return;
+ const response=await supabase.rpc('delete_protocol_service_item',{p_item_id:itemId});
+ if(response.error){toast(response.error.message);return;}toast('Attendee service deleted');await loadProtocol();await openProtocolAttendee(attendeeId);
+}
+function renderProtocolServices(request,stays,travel,lift,serviceItems,errors,attendee){
  const el=document.querySelector('#protocolServices');if(!el)return;
  if(errors.length){el.innerHTML=`<div class="notice error">Some operational records could not be loaded: ${esc(errors.map(error=>error.message).join('; '))}</div>`;return;}
  const arrival=travel.find(item=>item.direction==='arrival'),departure=travel.find(item=>item.direction==='departure');
@@ -811,9 +873,10 @@ function renderProtocolServices(request,stays,travel,lift,errors,attendee){
  <section class="service-group room-assignment-summary"><div class="service-group-head"><div><h4>Physical hotel room</h4><p>${esc(overview.accommodation_summary||'No room request recorded')}</p></div><div class="service-group-actions">${protocolServiceState(overview.accommodation_state)}<button class="btn btn-ghost btn-small" id="manageAttendeeRoom" type="button">View / amend room</button></div></div></section>
  <section class="service-group"><div class="service-group-head"><div><h4>Accommodation</h4><p>Each period is separately assigned and rated.</p></div>${canEditProtocol()?'<button class="btn btn-ghost btn-small" id="addStayPeriod">Add period</button>':''}</div><div id="stayForms" class="service-form-list">${(stays.length?stays:[null]).map(stay=>stayForm(stay,request,attendee.id)).join('')}</div></section>
  <section class="service-group"><div class="service-group-head"><div><h4>Travel and transfers</h4><p>Times are entered in local Méribel/Geneva time.</p></div></div><div class="travel-grid">${travelForm('arrival',arrival,request)}${travelForm('departure',departure,request)}</div></section>
- <section class="service-group"><div class="service-group-head"><div><h4>Lift pass</h4><p>The selected event rate is calculated from confirmed dates; Carre Neige is always included.</p></div></div>${liftForm(lift,request)}</section>`;
+ <section class="service-group"><div class="service-group-head"><div><h4>Lift pass</h4><p>The selected event rate is calculated from confirmed dates; Carre Neige is always included.</p></div></div>${liftForm(lift,request)}</section>
+ ${additionalServiceMarkup(serviceItems,request,attendee.id)}`;
  document.querySelector('#manageAttendeeRoom').onclick=()=>openRoomAllocationForAttendee(attendee.id);
- if(canEditProtocol())bindProtocolServiceForms(attendee.id,request);
+ if(canEditProtocol()){bindProtocolServiceForms(attendee.id,request);bindAdditionalServiceForms(attendee.id,request);}
 }
 async function openRoomAllocationForAttendee(attendeeId){
  state.protocolSection='accommodation';state.manualPersonOpen=false;render();

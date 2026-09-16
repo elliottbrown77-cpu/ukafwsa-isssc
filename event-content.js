@@ -6,7 +6,7 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     publicSection: 'today',
     staffSection: 'programme',
     announcements: [], venues: [], schedule: [], documents: [], results: [], media: [],
-    plans: [], tables: [], assignments: [], transfers: [], passengers: [], myArrangements: null, myArrangementsError: null,
+    plans: [], tables: [], assignments: [], transfers: [], passengers: [], myArrangements: null, myAdditionalServices: null, myArrangementsError: null,
     attendees: [], sponsors: [], notificationDeliveries: [],
     pushStatus: null, pushEnabled: false, pushSupported: true, notificationResult: null,
     pendingLoginEmail: sessionStorage.getItem('isssc-event-login-email') || '',
@@ -168,12 +168,16 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
         client.from('transfer_passengers').select('*').order('sort_order'),
       ]);
       [state.plans, state.tables, state.assignments, state.transfers, state.passengers] = privateResults.map(result => result.data || []);
-      const arrangements = await client.rpc('get_my_arrangements', { p_event_id: eventId });
+      const [arrangements,additionalServices] = await Promise.all([
+        client.rpc('get_my_arrangements', { p_event_id: eventId }),
+        client.rpc('get_my_additional_services', { p_event_id: eventId }),
+      ]);
       state.myArrangements = arrangements.data || null;
-      state.myArrangementsError = arrangements.error?.message || null;
+      state.myAdditionalServices = additionalServices.data || null;
+      state.myArrangementsError = arrangements.error?.message || additionalServices.error?.message || null;
     } else {
       state.plans = []; state.tables = []; state.assignments = []; state.transfers = []; state.passengers = [];
-      state.myArrangements = null; state.myArrangementsError = null;
+      state.myArrangements = null; state.myAdditionalServices = null; state.myArrangementsError = null;
     }
     renderPublicContent();
     await refreshNotificationOptIn();
@@ -291,11 +295,11 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     };
     bindEmailCodeControls(document.querySelector('#eventAppContent') || document);
     const signOut = document.querySelector('#attendeeEventSignOut');
-    if (signOut) signOut.onclick = async () => { await client.auth.signOut(); state.myArrangements = null; state.myArrangementsError = null; toast('Signed out'); };
+    if (signOut) signOut.onclick = async () => { await client.auth.signOut(); state.myArrangements = null; state.myAdditionalServices = null; state.myArrangementsError = null; toast('Signed out'); };
   }
 
   const arrangementState = value => {
-    const config = { confirmed: ['green', 'Confirmed'], pending: ['amber', 'Pending Protocol confirmation'], not_required: ['', 'Not requested'] }[value] || ['amber', 'Pending'];
+    const config = { confirmed: ['green', 'Confirmed'], pending: ['amber', 'Pending Protocol confirmation'], cancelled: ['red', 'Not supplied'], not_required: ['', 'Not requested'] }[value] || ['amber', 'Pending'];
     return `<span class="status ${config[0]}">${config[1]}</span>`;
   };
   const arrangementValue = value => value === true ? 'Yes' : value === false ? 'No' : value == null || value === '' ? '' : String(value);
@@ -305,8 +309,12 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
   };
   function arrangementCard(title, item, requestedRows, confirmedRows) {
     const hasAssigned = confirmedRows.some(([, value]) => arrangementValue(value));
-    return `<article class="arrangement-card"><div class="arrangement-card-head"><h4>${esc(title)}</h4>${arrangementState(item?.state)}</div><div class="arrangement-columns"><section><strong>Requested</strong>${arrangementRows(requestedRows)}</section><section><strong>Assigned by Protocol</strong>${item?.state === 'confirmed' || hasAssigned ? arrangementRows(confirmedRows) : '<p class="muted small">Awaiting a final Protocol decision.</p>'}</section></div></article>`;
+    const protocolContent = item?.state === 'cancelled' ? '<p class="muted small">Protocol has recorded that this item will not be supplied.</p>' : item?.state === 'confirmed' || hasAssigned ? arrangementRows(confirmedRows) : '<p class="muted small">Awaiting a final Protocol decision.</p>';
+    return `<article class="arrangement-card"><div class="arrangement-card-head"><h4>${esc(title)}</h4>${arrangementState(item?.state)}</div><div class="arrangement-columns"><section><strong>Requested</strong>${arrangementRows(requestedRows)}</section><section><strong>Assigned by Protocol</strong>${protocolContent}</section></div></article>`;
   }
+  const requestedYes = value => value === true || ['true','yes','1'].includes(String(value || '').toLowerCase());
+  const itemState = (items, requested) => items.some(item => item.status === 'confirmed') ? 'confirmed' : items.some(item => item.status === 'pending') ? 'pending' : items.length && items.every(item => item.status === 'cancelled') ? 'cancelled' : requested ? 'pending' : 'not_required';
+  const itemSummary = items => items.filter(item => item.status === 'confirmed').map(item => [item.title, item.service_date, item.details].filter(Boolean).join(' · ')).join('; ');
   function renderMyArrangements() {
     if (!getSession()) return eventLoginMarkup('your arrangements');
     if (state.myArrangementsError) return `<div class="notice error">Your arrangements could not be loaded: ${esc(state.myArrangementsError)}</div>`;
@@ -314,6 +322,9 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
     if (!people.length) return `<section class="surface"><div class="surface-body"><div class="notice"><strong>No attendee record is linked to this sign-in yet.</strong><p>Use the same email address entered on the registration form. If the registration has already been approved, ask Protocol to check the attendee email.</p></div><button class="btn btn-ghost btn-small" id="attendeeEventSignOut" type="button">Sign out</button></div></section>`;
     return `<div class="my-arrangements-intro"><div><span class="status purple">Private</span><h3>My arrangements</h3><p>Requests are shown beside the final details confirmed by Protocol. Prices and internal staff notes are not displayed.</p></div><button class="btn btn-ghost btn-small" id="attendeeEventSignOut" type="button">Sign out</button></div>${people.map(person => {
       const request = person.request || {}, accommodation = person.accommodation || {}, arrival = person.arrival || {}, departure = person.departure || {}, lift = person.lift_pass || {};
+      const extra = (state.myAdditionalServices?.rows || []).find(row => row.attendee_id === person.attendee_id) || {}, serviceItems = extra.items || [];
+      const lessonItems = serviceItems.filter(item => item.service_type === 'lesson'), equipmentItems = serviceItems.filter(item => item.service_type === 'equipment_hire'), dinnerItems = serviceItems.filter(item => item.service_type === 'dinner'), additionalItems = serviceItems.filter(item => ['champagne','other'].includes(item.service_type));
+      const lessons = { state: itemState(lessonItems, requestedYes(request.lessons_required)) }, equipment = { state: itemState(equipmentItems, requestedYes(request.equipment_hire_required)) }, dinner = { ...(extra.dinner_arrangement || {}), state: extra.dinner_arrangement?.confirmed ? 'confirmed' : itemState(dinnerItems, !!request.dinners_required) }, roomShare = extra.room_share || { state: requestedYes(accommodation.requested_share) ? 'pending' : 'not_required' }, additional = { state: itemState(additionalItems, false) };
       const arrivalTransfer = (person.transfers || []).find(item => item.direction === 'arrival');
       const departureTransfer = (person.transfers || []).find(item => item.direction === 'departure');
       return `<section class="surface attendee-arrangements"><div class="surface-head"><div><span class="status ${person.attendance_status === 'confirmed' ? 'green' : 'purple'}">${esc(person.attendance_status || 'Expected')}</span><h3>${esc(person.display_name)}</h3><p>${esc(person.category || '')}</p></div></div><div class="surface-body arrangements-grid">
@@ -329,7 +340,19 @@ export function createEventContentFeature({ client, eventId, getSession, getProf
         ${arrangementCard('Lift pass', lift,
           [['Lift pass requested', request.lift_pass_required], ['First ski day', request.first_ski_day], ['Last ski day', request.last_ski_day]],
           [['Pass required', lift.required], ['Pass type', lift.pass_type], ['Valid from', lift.start_date], ['Valid to', lift.end_date], ['Carre Neige', lift.carre_neige]])}
-        <article class="arrangement-card arrangement-other"><div class="arrangement-card-head"><h4>Other requests</h4><span class="status purple">Registration</span></div>${arrangementRows([['Lessons requested', request.lessons_required], ['Lesson type', request.lesson_type], ['Lesson dates', Array.isArray(request.lesson_dates) ? request.lesson_dates.join(', ') : request.lesson_dates], ['Equipment hire requested', request.equipment_hire_required], ['Dinners requested', request.dinners_required]])}</article>
+        ${arrangementCard('Room sharing', roomShare,
+          [['Room share requested', accommodation.requested_share], ['Requested with', accommodation.requested_share_with]],
+          [['Confirmed with', roomShare.confirmed_with], ['Room setup', roomShare.setup]])}
+        ${arrangementCard('Lessons', lessons,
+          [['Lessons requested', request.lessons_required], ['Lesson type', request.lesson_type], ['Requested dates', Array.isArray(request.lesson_dates) ? request.lesson_dates.join(', ') : request.lesson_dates]],
+          [['Confirmed lessons', itemSummary(lessonItems)]])}
+        ${arrangementCard('Equipment hire', equipment,
+          [['Equipment hire requested', request.equipment_hire_required]],
+          [['Confirmed arrangement', itemSummary(equipmentItems)]])}
+        ${arrangementCard('Evening meals', dinner,
+          [['Requested arrangement', dinner.requested || request.dinners_required]],
+          [['Confirmed arrangement', dinner.confirmed || itemSummary(dinnerItems)]])}
+        ${additional.state !== 'not_required' ? arrangementCard('Additional items', additional, [], [['Confirmed items', itemSummary(additionalItems)]]) : ''}
       </div></section>`;
     }).join('')}`;
   }
