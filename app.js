@@ -211,9 +211,11 @@ return `<div class="login-box"><div class="brand-lockup"><img src="/ukafwsa-mark
 function staffDashboard(){
 const role=state.profile?.app_role || 'authenticated';
 const canSendNotifications=['admin','protocol','operations','content_manager'].includes(role);
-let tabs=[['overview','Overview'],['workspaces','Bulk worksheets'],['reports','Reports & exports'],...(role==='admin'?[["approvals","Lift-pass approvals"]]:[]),['intake','New registrations'],['protocol','Protocol'],...(canSendNotifications?[['notifications','Notifications']]:[]),['sponsors','Sponsors'],['finance','Finance'],['content','Event content'],...(role==='admin'?[['admin','Admin settings']]:[])];
+const canSelectEvent=['admin','sponsor_manager','protocol','finance','operations','content_manager','read_only'].includes(role);
+let tabs=[['overview','Overview'],['workspaces','Bulk worksheets'],['reports','Reports & exports'],...(role==='admin'?[['approvals','Lift-pass approvals']]:[]),['intake','New registrations'],['protocol','Protocol'],...(canSendNotifications?[['notifications','Notifications']]:[]),['sponsors','Sponsors'],['finance','Finance'],['content','Event content'],...(role==='admin'?[['admin','Admin settings']]:[])];
 if(selectedEvent?.is_test)tabs=tabs.filter(([k])=>['protocol','finance','reports','approvals','workspaces'].includes(k));
-return `<div class="dashboard-shell${state.staffTab==='workspaces'?' dashboard-worksheets':''}"><aside class="side"><h3>Staff portal</h3>${tabs.map(([r,l])=>`<button data-stafftab="${r}" class="${state.staffTab===r?'active':''}">${l}</button>`).join('')}<button id="signOutBtn">Sign out</button></aside><div class="dash-main">${role==='admin'?`<label>Working event<select id="staffEventSelector" ${eventSwitchPending?'disabled':''}>${staffEvents.map(e=>`<option value="${e.id}" ${e.id===EVENT_ID?'selected':''}>${esc(e.name)}${e.is_test?' — TEST DATA':''}</option>`).join('')}</select></label>`:''}${selectedEvent?.is_test?'<div class="test-event-banner">TEST DATA — isolated event. Email, invitations and push delivery disabled. Invoices use TEST references.</div>':''}<div class="hero-mini"><span class="eyebrow">Role: ${role}</span><h2>${staffTitle()}</h2><p>${staffSubtitle()}</p></div><div id="staffPanel">${staffPanel()}</div></div></div>`;
+if(selectedEvent?.historical_read_only)tabs=tabs.filter(([k])=>['overview','workspaces','reports'].includes(k));
+return `<div class="dashboard-shell${state.staffTab==='workspaces'?' dashboard-worksheets':''}"><aside class="side"><h3>Staff portal</h3>${tabs.map(([r,l])=>`<button data-stafftab="${r}" class="${state.staffTab===r?'active':''}">${l}</button>`).join('')}<button id="signOutBtn">Sign out</button></aside><div class="dash-main">${canSelectEvent?`<label>Working event<select id="staffEventSelector" ${eventSwitchPending?'disabled':''}>${staffEvents.map(e=>`<option value="${e.id}" ${e.id===EVENT_ID?'selected':''}>${esc(e.name)}${e.historical_read_only?' — HISTORICAL · READ ONLY':e.is_test?' — TEST DATA':''}</option>`).join('')}</select></label>`:''}${selectedEvent?.historical_read_only?'<div class="test-event-banner historical-replay-banner"><strong>ISSSC 2026 historical replay — read-only.</strong> Contact emails are anonymized and mobile numbers omitted. Operational and reconstructed billing rows are loaded; the final invoice extract differs by £886.68 and is not included as confirmed invoice data.</div>':selectedEvent?.is_test?'<div class="test-event-banner">TEST DATA — isolated event. Email, invitations and push delivery disabled. Invoices use TEST references.</div>':''}<div class="hero-mini"><span class="eyebrow">Role: ${role}</span><h2>${staffTitle()}</h2><p>${staffSubtitle()}</p></div><div id="staffPanel">${staffPanel()}</div></div></div>`;
 }
 function staffTitle(){return ({workspaces:'Registration & billing worksheets',reports:'Reports & exports',approvals:'Lift-pass approvals',overview:'Operational overview',intake:'Registration intake',protocol:'Protocol operations',notifications:'Staff notifications',sponsors:'Sponsor management',finance:'Finance & billing',content:'Event app content',admin:'Administration'})[state.staffTab]}
 function staffSubtitle(){return ({workspaces:'Review and amend multiple records, generate invoices and manage dispatch.',reports:'Search, filter and export authorised operational reports.',approvals:'Review justified changes before they become operational.',overview:'One view of the event workflow.',intake:'Review public attendee requests before they become canonical records.',protocol:'Confirm hotel, room, transfer, lift pass and usage data.',notifications:'Publish notices and send browser alerts to enrolled devices.',sponsors:'Permanent organisations with event-year sponsorship and invitations.',finance:'Review rates, billing readiness and immutable invoice snapshots.',content:'Publish programme, venues, results, media and table plans.',admin:'Manage staff access and operational email settings.'})[state.staffTab]}
@@ -557,7 +559,7 @@ function renderOperationalOverview(){
 
 async function loadOperationalOverview(showToast=false){
  const el=document.querySelector('#operationalOverview');if(el)el.innerHTML='<div class="empty">Refreshing the operational position…</div>';
- const canCheckEmail=['admin','finance','read_only'].includes(state.profile?.app_role);
+ const canCheckEmail=!selectedEvent?.historical_read_only&&['admin','finance','read_only'].includes(state.profile?.app_role);
  if(!canCheckEmail)state.invoiceEmailCapabilities=null;
  const requests=[supabase.rpc('get_operational_overview',{p_event_id:EVENT_ID})];
  if(canCheckEmail)requests.push(supabase.functions.invoke('invoice-delivery',{body:{action:'capabilities',event_id:EVENT_ID}}));
@@ -632,7 +634,7 @@ async function reviewIntake(row,decision){
 
 function protocolStatusLabel(status){return ({expected:'Expected',confirmed:'Confirmed',declined:'Declined',cancelled:'Cancelled'})[status]||status||'Unknown';}
 function protocolStatusClass(status){return status==='confirmed'?'green':(['declined','cancelled'].includes(status)?'red':'purple');}
-function canEditProtocol(){return ['admin','protocol','operations'].includes(state.profile?.app_role);}
+function canEditProtocol(){return !selectedEvent?.historical_read_only&&['admin','protocol','operations'].includes(state.profile?.app_role);}
 function manualPersonMarkup(){
  const organisations=state.protocolLookups.organisations||[];
  return `<section class="surface manual-person-panel"><div class="surface-head"><div><strong>Add person without a registration</strong><div class="muted small">Creates one reusable person for room allocation, transfer manifests and lift passes.</div></div><button class="btn btn-ghost btn-small" id="closeManualPerson" type="button">Close</button></div><div class="surface-body"><form id="manualPersonForm" class="form-grid record-form"><div class="field"><label>Rank / title</label><input name="title_rank" maxlength="80"></div><div class="field"><label>Category *</label><select name="category" required>${selectedOptions(['Military VIP','Military Guest','Sponsor','Sponsor Guest','Royal Party','Committee','Protocol','Hill Team','Other'],'Other')}</select></div><div class="field"><label>First name *</label><input name="first_name" maxlength="120" required></div><div class="field"><label>Surname *</label><input name="surname" maxlength="120" required></div><div class="field"><label>Organisation</label><select name="organisation_id"><option value="">No linked organisation</option>${organisations.map(org=>`<option value="${esc(org.id)}">${esc(org.organisation_name)}</option>`).join('')}</select></div><div class="field"><label>Organisation / display name</label><input name="display_company" maxlength="200" placeholder="Use if the organisation is not listed"></div><div class="field"><label>Email</label><input type="email" name="email" maxlength="320"><small>An exact email match will link a later registration to this person.</small></div><div class="field"><label>Mobile</label><input name="mobile" inputmode="tel" maxlength="80"></div><div class="field"><label>Service</label><select name="service">${selectedOptions(['Royal Navy','British Army','Royal Air Force','Civilian','Other'],'')}</select></div><div class="field"><label>Role / appointment</label><input name="position_role" maxlength="200"></div><div class="field full"><label>Protocol notes</label><textarea name="protocol_notes" placeholder="Why the person was added or any operational information"></textarea></div><div class="field full"><div class="notice">This creates a canonical person, marked as a Protocol entry. It does not automatically confirm a room, transfer or lift pass; Protocol retains each final decision.</div></div><div class="field full"><div class="service-actions"><button class="btn btn-primary" type="submit">Create person</button><div class="service-save-result" id="manualPersonResult"></div></div></div></form></div></section>`;
@@ -950,8 +952,8 @@ async function saveAttendeeCore(event,id){
  toast('Attendee details saved');await loadProtocol();openProtocolAttendee(id);
 }
 
-function canEditSponsors(){return ['admin','sponsor_manager'].includes(state.profile?.app_role);}
-function canEditFinance(){return ['admin','finance'].includes(state.profile?.app_role);}
+function canEditSponsors(){return !selectedEvent?.historical_read_only&&['admin','sponsor_manager'].includes(state.profile?.app_role);}
+function canEditFinance(){return !selectedEvent?.historical_read_only&&['admin','finance'].includes(state.profile?.app_role);}
 function checked(value){return value?' checked':'';}
 function sponsorStatusLabel(status){return ({prospective:'Prospective',invited:'Invited',confirmed:'Confirmed',declined:'Declined',cancelled:'Cancelled'})[status]||status||'Unknown';}
 function sponsorStatusClass(status){return status==='confirmed'?'green':(['declined','cancelled'].includes(status)?'red':status==='invited'?'purple':'amber');}
@@ -1485,7 +1487,7 @@ function finishAuthLanding(){
 render();
 
 function createStaffFeatures(){
-  workspaces=createWorkspaces({client:supabase,eventId:EVENT_ID,getWorkingEvent:()=>EVENT_ID,isTest:!!selectedEvent?.is_test,getProfile:()=>state.profile,escapeHtml:esc,toast,openAttendee:async id=>{state.staffTab='protocol';state.protocolSection='attendees';render();await loadProtocol();await openProtocolAttendee(id);}});
+  workspaces=createWorkspaces({client:supabase,eventId:EVENT_ID,getWorkingEvent:()=>EVENT_ID,isTest:!!selectedEvent?.is_test,isReadOnly:()=>!!selectedEvent?.historical_read_only,getProfile:()=>state.profile,escapeHtml:esc,toast,openAttendee:async id=>{state.staffTab='protocol';state.protocolSection='attendees';render();await loadProtocol();await openProtocolAttendee(id);}});
   eventFeature=createEventContentFeature({client:supabase,eventId:EVENT_ID,getSession:()=>state.session,getProfile:()=>state.profile,escapeHtml:esc,toast});
   roomAllocator=createRoomAllocator({client:supabase,eventId:EVENT_ID,isTest:!!selectedEvent?.is_test,eventStart:EVENT_DATE_START,eventEnd:EVENT_DATE_END,getProfile:()=>state.profile,escapeHtml:esc,toast});
   adminSettings=createAdminSettings({client:supabase,eventId:EVENT_ID,getProfile:()=>state.profile,escapeHtml:esc,toast});
@@ -1493,13 +1495,14 @@ function createStaffFeatures(){
   liftApprovals=createLiftApprovals({client:supabase,eventId:EVENT_ID,escapeHtml:esc,toast});
 }
 async function loadStaffEvents(){
- if(state.profile?.app_role!=='admin'){staffEvents=[];return;}
- const {data,error}=await supabase.from('events').select('id,name,event_year,start_date,end_date,is_test,delivery_disabled').order('event_year',{ascending:false});
- if(!error)staffEvents=(data||[]).filter(e=>e.id===LIVE_EVENT_ID||e.is_test);
+ const role=state.profile?.app_role,canSelect=['admin','sponsor_manager','protocol','finance','operations','content_manager','read_only'].includes(role);
+ if(!canSelect){staffEvents=[];return;}
+ const {data,error}=await supabase.from('events').select('id,name,event_year,start_date,end_date,is_test,delivery_disabled,historical_read_only').order('event_year',{ascending:false});
+ if(!error)staffEvents=(data||[]).filter(e=>e.id===LIVE_EVENT_ID||(e.historical_read_only&&canSelect)||(e.is_test&&role==='admin'));
  selectedEvent=staffEvents.find(e=>e.id===EVENT_ID)||null;
 }
 async function switchStaffEvent(id){
- if(state.profile?.app_role!=='admin'||eventSwitchPending)return;
+ if(!['admin','sponsor_manager','protocol','finance','operations','content_manager','read_only'].includes(state.profile?.app_role)||eventSwitchPending)return;
  const event=staffEvents.find(e=>e.id===id);if(!event)return;
  // Full document navigation clears all outstanding requests, forms and cached rows.
  sessionStorage.setItem('isssc-working-event',id);
@@ -1509,10 +1512,10 @@ async function restoreStaffEvent(){
  await loadStaffEvents();
  const id=new URLSearchParams(location.search).get('working_event');
  const event=staffEvents.find(e=>e.id===id);
- if(event?.is_test&&state.profile?.app_role==='admin'){
+ if((event?.is_test&&state.profile?.app_role==='admin')||(event?.historical_read_only&&['admin','sponsor_manager','protocol','finance','operations','content_manager','read_only'].includes(state.profile?.app_role))){
   EVENT_ID=event.id;selectedEvent=event;EVENT_DATE_START=event.start_date;EVENT_DATE_END=event.end_date;
   TRAVEL_DATE_START=event.start_date;TRAVEL_DATE_END=event.end_date;TRAVEL_DATES=dateRange(TRAVEL_DATE_START,TRAVEL_DATE_END);
-  state.route='staff';state.staffTab='reports';createStaffFeatures();
+  state.route='staff';state.staffTab=event.historical_read_only?'workspaces':'reports';createStaffFeatures();
  }
 }
 
@@ -1522,7 +1525,7 @@ async function initialiseBackend(){
   supabase=createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
   createStaffFeatures();
   const {data:{session}}=await supabase.auth.getSession();state.session=session;if(session)finishAuthLanding();await loadProfile();await restoreStaffEvent();
-  supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;if(nextSession)finishAuthLanding();await loadProfile();if(!nextSession||state.profile?.app_role!=='admin'){EVENT_ID=LIVE_EVENT_ID;selectedEvent=null;EVENT_DATE_START='2027-01-30';EVENT_DATE_END='2027-02-06';TRAVEL_DATE_START='2027-01-27';TRAVEL_DATE_END='2027-02-09';TRAVEL_DATES=dateRange(TRAVEL_DATE_START,TRAVEL_DATE_END);createStaffFeatures();}else await loadStaffEvents();if(['staff','event'].includes(state.route))render();});
+  supabase.auth.onAuthStateChange(async(_event,nextSession)=>{state.session=nextSession;if(nextSession)finishAuthLanding();await loadProfile();const staffRoles=['admin','sponsor_manager','protocol','finance','operations','content_manager','read_only'];if(!nextSession||!staffRoles.includes(state.profile?.app_role)){EVENT_ID=LIVE_EVENT_ID;selectedEvent=null;EVENT_DATE_START='2027-01-30';EVENT_DATE_END='2027-02-06';TRAVEL_DATE_START='2027-01-27';TRAVEL_DATE_END='2027-02-09';TRAVEL_DATES=dateRange(TRAVEL_DATE_START,TRAVEL_DATE_END);createStaffFeatures();}else{await loadStaffEvents();const requestedEvent=new URLSearchParams(location.search).get('working_event');const event=staffEvents.find(e=>e.id===(requestedEvent||EVENT_ID));if(event){EVENT_ID=event.id;selectedEvent=event;EVENT_DATE_START=event.start_date;EVENT_DATE_END=event.end_date;TRAVEL_DATE_START=event.start_date;TRAVEL_DATE_END=event.end_date;TRAVEL_DATES=dateRange(TRAVEL_DATE_START,TRAVEL_DATE_END);}else if(EVENT_ID!==LIVE_EVENT_ID){EVENT_ID=LIVE_EVENT_ID;selectedEvent=staffEvents.find(e=>e.id===LIVE_EVENT_ID)||null;EVENT_DATE_START='2027-01-30';EVENT_DATE_END='2027-02-06';TRAVEL_DATE_START='2027-01-27';TRAVEL_DATE_END='2027-02-09';TRAVEL_DATES=dateRange(TRAVEL_DATE_START,TRAVEL_DATE_END);}createStaffFeatures();}if(['staff','event'].includes(state.route))render();});
   if(['staff','event'].includes(state.route))render();
  }catch(error){
   console.error('Secure service connection failed',error);
