@@ -1,0 +1,3 @@
+import {cpSync,mkdirSync,rmSync} from 'node:fs';
+const files=['index.html','app.js','billing.js','workspaces.js','reports.js','admin-settings.js','event-content.js','room-allocation.js','supabase-client.js','styles.css','sw.js','manifest.webmanifest','privacy.html','_headers','_redirects','ukafwsa-mark.svg','ukafwsa-snowflake.svg','icon-192.png','icon-512.png','maskable-512.png'];
+rmSync('dist',{recursive:true,force:true});mkdirSync('dist/vendor',{recursive:true});for(const f of files)cpSync(f,'dist/'+f);cpSync('vendor/exceljs-4.4.0.min.js','dist/vendor/exceljs-4.4.0.min.js');cpSync('vendor/exceljs-LICENSE.txt','dist/vendor/exceljs-LICENSE.txt');console.log('Built public assets only into dist/');

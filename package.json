@@ -1,0 +1,19 @@
+{
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "playwright": "1.62.1",
+    "supabase": "2.75.0"
+  },
+  "dependencies": {
+    "exceljs": "4.4.0"
+  },
+  "name": "ukafwsa-isssc",
+  "version": "35.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:replay": "node scripts/test-replay.mjs",
+    "build": "node scripts/build.mjs"
+  }
+}

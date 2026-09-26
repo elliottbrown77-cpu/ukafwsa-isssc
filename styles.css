@@ -78,3 +78,15 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{
 @media(max-width:1050px){.attendee-service-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:760px){.attendee-service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.attendee-summary-head,.attendee-summary-foot{align-items:stretch;flex-direction:column}.attendee-open-action{text-align:center}.attendee-summary-foot>span:last-child{display:none}}
 @media(max-width:480px){.attendee-service-grid{grid-template-columns:1fr}.attendee-service-cell{padding:12px 14px}}
+/* v35 reporting and review workspaces */
+.report-toolbar,.report-toolbar form,.report-actions{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:16px}.report-toolbar label{display:grid;gap:5px;font-size:.85rem}.report-toolbar input,.report-toolbar select{max-width:220px}.report-columns{display:flex;flex-wrap:wrap;gap:12px;padding:16px 0}.report-columns input{width:auto}.report-grid{max-height:65vh;overflow:auto;border:1px solid #ddd;border-radius:8px;margin-top:16px}.report-grid table{min-width:100%;width:max-content}.report-grid th{position:sticky;top:0;background:#f4effa;z-index:1;white-space:nowrap}.report-grid th button{font:inherit;border:0;background:none;cursor:pointer;color:inherit}.report-grid td{max-width:360px;white-space:pre-wrap;vertical-align:top}.report-name{border:0;background:none;text-decoration:underline;color:#6f2dbd;cursor:pointer;font:inherit}.approval-card{border-bottom:1px solid #ddd;padding:20px 0}.approval-card textarea{display:block;width:100%;margin:8px 0}.test-event-banner{background:#ffe7a3;color:#402800;padding:14px;border:2px solid #b16d00;border-radius:8px;margin-bottom:16px;font-weight:700}.report-permission-grid{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center}.report-permission-grid input{width:auto}
+
+/* Bulk worksheets: fixed headings, readable editable cells and visible unsaved state. */
+.bulk-grid {max-height:68vh;overflow:auto;margin:16px 0;border:1px solid var(--border,#d7e2ec)}
+.bulk-grid thead th{position:sticky;top:0;z-index:2;background:#edf3f8;min-width:150px}
+.bulk-grid th:first-child,.bulk-grid td:first-child{min-width:40px;position:sticky;left:0;background:#edf3f8;z-index:1}
+.bulk-grid th:first-child{z-index:3}.bulk-grid td{max-width:380px;white-space:normal;vertical-align:top}
+.bulk-grid td span{display:block;max-height:100px;overflow:auto;overflow-wrap:anywhere}
+.bulk-grid input:not([type=checkbox]){min-width:145px;width:100%;padding:7px;border:1px solid #c9d5e0;border-radius:4px}
+.bulk-grid input.dirty{background:#fff4ce;border-color:#a87000}.bulk-grid th input{margin-top:7px;font-weight:normal}
+#bulkResults{max-height:260px;overflow:auto}#bulkResults p{margin:6px 0}

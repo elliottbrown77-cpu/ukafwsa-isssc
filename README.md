@@ -14,9 +14,9 @@ Static single-page web application for Netlify, backed by the Supabase project `
 - PWA manifest, offline static assets and production security headers
 
 ## Deployment
-Upload the release files to the root of the connected GitHub repository. Netlify deploys the `main` branch to `https://ukafwsa-isssc.netlify.app`.
+Netlify builds public assets with `node scripts/build.mjs` and publishes `dist/`. The connected production branch is `main`. See [V35-REVIEW.md](V35-REVIEW.md) for the worksheet and billing changes, verification, and outstanding staging checks.
 
-Database migrations in `supabase/migrations` have already been applied to the linked production Supabase project. Do not paste or rerun them manually unless recovering a different environment.
+The nine v35 migrations in `supabase/migrations` were applied to the hosted database on 26 September 2026. The structural schema fixture under `tests/` is for disposable local tests only.
 
 ## Before public launch
 

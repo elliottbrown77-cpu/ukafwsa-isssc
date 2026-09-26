@@ -1,3 +1,4 @@
+import { REPORTS } from '/reports.js';
 export function createAdminSettings({client,eventId,getProfile,escapeHtml,toast}){
   const h=escapeHtml;
   const roles=[
@@ -14,7 +15,7 @@ export function createAdminSettings({client,eventId,getProfile,escapeHtml,toast}
   const isAdmin=()=>getProfile()?.app_role==='admin';
 
   function markup(){
-    return `<div class="admin-settings" id="adminSettings"><section class="surface"><div class="surface-head"><div><strong>Staff access</strong><div class="muted small">Approve staff email addresses, assign roles and deactivate access. Changes take effect on the next request.</div></div><button class="btn btn-primary" id="addStaffAccess">Add staff member</button></div><div class="surface-body"><div id="staffAccessList" class="empty">Loading staff access…</div><div id="staffAccessEditor"></div></div></section><section class="section"><div class="surface"><div class="surface-head"><div><strong>Email sending</strong><div class="muted small">Control the address used for ISSSC invoice emails. Provider credentials remain protected and are never displayed here.</div></div><button class="btn btn-ghost" id="refreshAdminSettings">Refresh</button></div><div class="surface-body"><div id="emailSettingsPanel" class="empty">Loading email settings…</div></div></div></section></div>`;
+    return `<div class="admin-settings" id="adminSettings"><section class="surface"><div class="surface-head"><div><strong>Staff access</strong><div class="muted small">Approve staff email addresses, assign roles and deactivate access. Changes take effect on the next request.</div></div><button class="btn btn-primary" id="addStaffAccess">Add staff member</button></div><div class="surface-body"><div id="staffAccessList" class="empty">Loading staff access…</div><div id="staffAccessEditor"></div></div></section><section class="section surface"><div class="surface-body"><h3>Report permissions</h3><p>Admin has all reports. Protocol and Operations always have transport access. Other reports are assigned individually below.</p><label>Staff member<select id="reportPermissionUser"></select></label><div id="reportPermissionEditor"></div></div></section><section class="section"><div class="surface"><div class="surface-head"><div><strong>Email sending</strong><div class="muted small">Control the address used for ISSSC invoice emails. Provider credentials remain protected and are never displayed here.</div></div><button class="btn btn-ghost" id="refreshAdminSettings">Refresh</button></div><div class="surface-body"><div id="emailSettingsPanel" class="empty">Loading email settings…</div></div></div></section></div>`;
   }
 
   async function load(){
@@ -37,7 +38,7 @@ export function createAdminSettings({client,eventId,getProfile,escapeHtml,toast}
     }finally{state.loading=false}
   }
 
-  function render(){renderStaff();renderEmail();bindInner()}
+  function render(){renderStaff();renderEmail();bindInner();renderReportPermissions()}
   function renderStaff(){
     const el=document.querySelector('#staffAccessList');if(!el)return;
     if(!state.staff.length){el.innerHTML='<div class="empty">No staff email addresses have been approved yet.</div>';return}
@@ -77,6 +78,21 @@ export function createAdminSettings({client,eventId,getProfile,escapeHtml,toast}
     button.disabled=false;
     if(response.error){result.innerHTML=`<div class="notice error">${value(response.error.message)}</div>`;return}
     toast('Email settings saved');await load();
+  }
+
+  async function renderReportPermissions(){
+    const select=document.querySelector('#reportPermissionUser');if(!select)return;
+    select.innerHTML='<option value="">Choose a signed-in staff member…</option>'+state.staff.filter(r=>r.user_id&&r.active).map(r=>`<option value="${value(r.user_id)}">${value(r.display_name||r.email)} (${value(r.app_role)})</option>`).join('');
+    select.onchange=async()=>{
+      const el=document.querySelector('#reportPermissionEditor');el.innerHTML='';if(!select.value)return;
+      const userId=select.value;
+      const {data,error}=await client.from('report_permissions').select('report_key,can_export').eq('event_id',eventId).eq('user_id',userId);
+      if(error){el.textContent=error.message;return;}if(select.value!==userId)return;
+      el.innerHTML=`<form id="reportPermissionForm"><div class="report-permission-grid"><strong>Report</strong><strong>View</strong><strong>Export</strong>${Object.entries(REPORTS).map(([k,l])=>{const p=data.find(r=>r.report_key===k);return `<span>${l}</span><input type="checkbox" aria-label="View ${l}" name="view_${k}" ${p?'checked':''}><input type="checkbox" aria-label="Export ${l}" name="export_${k}" ${p?.can_export?'checked':''}>`}).join('')}</div><button class="btn btn-primary">Save report permissions</button><div role="status"></div></form>`;
+      el.querySelector('form').onsubmit=async e=>{e.preventDefault();const form=e.target,button=form.querySelector('button');button.disabled=true;const d=new FormData(form);
+        try{for(const k of Object.keys(REPORTS)){const r=await client.rpc('admin_set_report_permission',{p_event_id:eventId,p_user_id:userId,p_report_key:k,p_view:d.has('view_'+k),p_export:d.has('export_'+k)});if(r.error)throw r.error;}form.querySelector('[role=status]').textContent='Permissions saved.';}catch(error){form.querySelector('[role=status]').textContent=error.message;}finally{button.disabled=false;}
+      };
+    };
   }
 
   function bindInner(){
