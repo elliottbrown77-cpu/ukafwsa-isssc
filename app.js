@@ -1,4 +1,4 @@
-import { createWorkspaces } from '/workspaces.js';
+import { createWorkspaces } from '/workspaces.js?v=20260926-replay';
 import { mountBillingEditor } from '/billing.js';
 import { createReports, createLiftApprovals } from '/reports.js';
 import { createEventContentFeature } from '/event-content.js';
