@@ -90,3 +90,19 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{
 .bulk-grid input:not([type=checkbox]){min-width:145px;width:100%;padding:7px;border:1px solid #c9d5e0;border-radius:4px}
 .bulk-grid input.dirty{background:#fff4ce;border-color:#a87000}.bulk-grid th input{margin-top:7px;font-weight:normal}
 #bulkResults{max-height:260px;overflow:auto}#bulkResults p{margin:6px 0}
+
+/* Give the spreadsheet the full viewport width beneath the app and staff menus. */
+.main-wide-workspace{width:100%;max-width:none;margin:0;padding:16px clamp(12px,1.6vw,26px) 34px}
+.dashboard-worksheets{display:block}
+.dashboard-worksheets>.side{position:sticky;top:72px;z-index:20;display:flex;align-items:center;gap:4px;overflow-x:auto;margin:0 0 14px;padding:8px 10px;border:1px solid rgba(255,255,255,.1);border-radius:12px;box-shadow:0 5px 16px rgba(7,24,39,.12);scrollbar-width:thin}
+.dashboard-worksheets>.side h3{flex:0 0 auto;padding:8px 10px}
+.dashboard-worksheets>.side button{flex:0 0 auto;width:auto;white-space:nowrap;padding:9px 12px}
+.dashboard-worksheets>.dash-main{width:100%;min-width:0}
+.dashboard-worksheets>.dash-main>.hero-mini{padding:15px 20px;margin-bottom:12px;border-radius:14px}
+.dashboard-worksheets>.dash-main>.hero-mini h2{font-size:21px;margin:5px 0 2px}
+.dashboard-worksheets>.dash-main>.hero-mini p{margin:0;font-size:13px;line-height:1.4}
+.dashboard-worksheets #staffPanel>.surface{border-radius:14px}
+.dashboard-worksheets #staffPanel>.surface>.surface-body{padding:14px}
+.dashboard-worksheets .bulk-grid{min-height:48vh;max-height:calc(100vh - 360px);margin-top:12px}
+.dashboard-worksheets .bulk-grid table{width:max(100%,max-content)}
+@media(max-width:700px){.main-wide-workspace{padding:10px 0 24px}.dashboard-worksheets>.side{top:0;margin-bottom:10px;border-radius:0;padding:6px 10px}.dashboard-worksheets>.side h3{display:none}.dashboard-worksheets>.dash-main>.hero-mini{margin:0 10px 10px;padding:13px 15px}.dashboard-worksheets #staffPanel>.surface{border-radius:0;border-left:0;border-right:0}.dashboard-worksheets #staffPanel>.surface>.surface-body{padding:12px 10px}.dashboard-worksheets .bulk-grid{min-height:52vh;max-height:calc(100vh - 320px)}}
